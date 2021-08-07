@@ -2,11 +2,15 @@ package main
 
 import (
 	"fmt"
-	"time"
 )
 
+type A struct {
+	x int
+	y int
+}
+
 func main() {
-	go fmt.Println(1)
-	time.Sleep(1000 * time.Millisecond)
-	fmt.Println(2)
+	var a = "abcd"
+
+	fmt.Println(a[:3])
 }
