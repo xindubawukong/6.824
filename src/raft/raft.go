@@ -251,6 +251,7 @@ type AppendEntriesReply struct {
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
+	// fmt.Printf("AppendEntries me: %d  args: %v\n", rf.me, args)
 	if args.Term > rf.currentTerm {
 		rf.demote(args.Term)
 	}
@@ -264,6 +265,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+	// fmt.Printf("sendAppendEntries me: %d  to: %d  args: %v\n", rf.me, server, args)
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	return ok
 }
@@ -303,8 +305,8 @@ func (rf *Raft) tryStartElection() {
 	var replies = make([]RequestVoteReply, 0)
 	cnt := 1
 	for reply := range ch {
-		// fmt.Printf("start election, me: %d  replies: %v  time: %v\n", rf.me, replies, time.Now())
 		replies = append(replies, reply)
+		// fmt.Printf("start election, me: %d  replies: %v  time: %v\n", rf.me, replies, time.Now())
 		if reply.VoteGranted {
 			cnt++
 		}
@@ -315,11 +317,8 @@ func (rf *Raft) tryStartElection() {
 		if rf.status == CANDIDATE && rf.currentTerm == args.Term && isMajority(cnt, len(rf.peers)) {
 			rf.status = LEADER
 			// fmt.Printf("%d became leader!\n", rf.me)
-			rf.mu.Unlock()
-			break
-		} else {
-			rf.mu.Unlock()
 		}
+		rf.mu.Unlock()
 		if len(replies) == len(rf.peers)-1 {
 			break
 		}
@@ -333,7 +332,7 @@ func (rf *Raft) trySendHeartBeat() {
 	args.Term = rf.currentTerm
 	args.LeaderId = rf.me
 	rf.mu.Unlock()
-
+	// fmt.Println("trySendHeartBeat", rf.me, shouldSend)
 	if !shouldSend {
 		return
 	}
@@ -378,9 +377,11 @@ func (rf *Raft) trySendHeartBeat() {
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
+	rf.mu.Lock()
 	index := -1
 	term := -1
 	isLeader := rf.status == LEADER
+	rf.mu.Unlock()
 
 	// Your code here (2B).
 
@@ -417,8 +418,7 @@ func (rf *Raft) ticker() {
 		// be started and to randomize sleeping time using
 		// time.Sleep().
 
-		rf.tryStartElection()
-
+		go rf.tryStartElection()
 		time.Sleep(50 * time.Millisecond)
 
 	}
@@ -426,7 +426,7 @@ func (rf *Raft) ticker() {
 
 func (rf *Raft) startHeartBeat() {
 	for !rf.killed() {
-		rf.trySendHeartBeat()
+		go rf.trySendHeartBeat()
 		time.Sleep(120 * time.Millisecond)
 	}
 }
@@ -444,7 +444,10 @@ func (rf *Raft) startHeartBeat() {
 //
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
-	fmt.Println("Start Raft Server", me)
+	if len(peers) == 0 {
+		fmt.Println("no peers!")
+		return nil
+	}
 
 	rf := &Raft{}
 	rf.peers = peers
