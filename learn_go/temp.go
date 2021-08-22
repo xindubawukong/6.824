@@ -1,18 +1,10 @@
 package main
 
-import "log"
+import "fmt"
 
-// Debugging
-const Debug = true
-
-func DPrintf(format string, a ...interface{}) (n int) {
-	if Debug {
-		log.Printf(format, a...)
-	}
-	return
-}
 
 func main() {
-	var x = DPrintf("asd")
-	DPrintf("%v", x)
+	var a int = 5
+	var b int = 2
+	fmt.Println(a / b)
 }
