@@ -1,25 +1,18 @@
 package main
 
-import (
-	"fmt"
-	"time"
-)
+import "log"
 
-var a = 0
-var ch = make(chan int)
+// Debugging
+const Debug = true
 
-func set(x int) {
-	a = x;
-	ch <- x
+func DPrintf(format string, a ...interface{}) (n int) {
+	if Debug {
+		log.Printf(format, a...)
+	}
+	return
 }
 
 func main() {
-	for {
-		go set(1)
-		go set(2)
-		time.Sleep(1000 * time.Millisecond)
-		var t  = <- ch
-		t  = <- ch
-		fmt.Println(t, a)
-	}
+	var x = DPrintf("asd")
+	DPrintf("%v", x)
 }
