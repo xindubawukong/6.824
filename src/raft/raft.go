@@ -294,10 +294,9 @@ type AppendEntriesArgs struct {
 }
 
 type AppendEntriesReply struct {
-	Term          int
-	Success       bool
-	ConflictIndex int
-	ConflictTerm  int
+	Term    int
+	Success bool
+	Samples []LogEntry
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
@@ -306,20 +305,21 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.demote(args.Term)
 	}
 	reply.Term = rf.currentTerm
+	reply.Samples = make([]LogEntry, 0)
 	if args.Term >= rf.currentTerm && rf.status == FOLLOWER {
 		rf.electionTimer = time.Now()
 		rf.electionTimeout = getRandomElectionTimeout()
 		if args.PrevLogIndex >= len(rf.log) || rf.log[args.PrevLogIndex].Index != args.PrevLogIndex || rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
 			reply.Success = false
-			if args.PrevLogIndex >= len(rf.log) {
-				reply.ConflictIndex = len(rf.log)
-				reply.ConflictTerm = -1
-			} else {
-				reply.ConflictTerm = rf.log[args.PrevLogIndex].Term
-				reply.ConflictIndex = args.PrevLogIndex
-				for reply.ConflictIndex > 0 && rf.log[reply.ConflictIndex-1].Term == reply.ConflictTerm {
-					reply.ConflictIndex--
-				}
+			now := get_min(len(rf.log)-1, args.PrevLogIndex)
+			step := 1
+			for now >= 0 {
+				var entry LogEntry
+				entry.Index = rf.log[now].Index
+				entry.Term = rf.log[now].Term
+				reply.Samples = append(reply.Samples, entry)
+				now -= step
+				step *= 2
 			}
 		} else {
 			reply.Success = true
@@ -470,6 +470,7 @@ func (rf *Raft) trySendHeartBeat() {
 
 func (rf *Raft) trySyncLogWith(server int) {
 	rf.syncing[server].Lock()
+	DPrintf("sync start, me: %d  server: %d\n", rf.me, server)
 	for !rf.killed() {
 		rf.mu.Lock()
 		shouldSend := (rf.status == LEADER) && rf.log[len(rf.log)-1].Index >= rf.nextIndex[server]
@@ -513,20 +514,21 @@ func (rf *Raft) trySyncLogWith(server int) {
 			shouldBreak = false
 		} else { // optimization for nextIndex--
 			shouldBreak = false
-			if reply.ConflictTerm == -1 {
-				rf.nextIndex[server] = get_max(rf.matchIndex[server]+1, reply.ConflictIndex)
-			} else {
-				i := len(rf.log) - 1
-				for i >= 0 && rf.log[i].Term != reply.ConflictTerm {
-					i--
-				}
-				if i == -1 {
-					rf.nextIndex[server] = get_max(rf.matchIndex[server]+1, reply.ConflictIndex)
-				} else {
-					rf.nextIndex[server] = get_max(rf.matchIndex[server]+1, i+1)
+			updated := false
+			if len(reply.Samples) > 0 {
+				for i := 0; i < len(reply.Samples); i++ {
+					entry := reply.Samples[i]
+					if rf.log[entry.Index].Index == entry.Index && rf.log[entry.Index].Term == entry.Term {
+						rf.nextIndex[server] = get_max(rf.matchIndex[server]+1, entry.Index+1)
+						updated = true
+						break
+					}
 				}
 			}
-			// DPrintf("--\n")
+			if !updated {
+				rf.nextIndex[server] = rf.matchIndex[server] + 1
+			}
+			DPrintf("syncing  me: %d  to: %d  reply: %v  new nextIndex: %d", rf.me, server, reply, rf.nextIndex[server])
 		}
 		rf.mu.Unlock()
 		if reply.Term == 0 {
@@ -536,6 +538,7 @@ func (rf *Raft) trySyncLogWith(server int) {
 			break
 		}
 	}
+	DPrintf("sync done, me: %d  server: %d\n", rf.me, server)
 	rf.syncing[server].Unlock()
 }
 
