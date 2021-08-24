@@ -72,7 +72,6 @@ type Raft struct {
 	votedFor    int
 	log         []LogEntry
 	commitIndex int
-	lastApplied int
 	nextIndex   []int
 	matchIndex  []int
 
@@ -82,6 +81,9 @@ type Raft struct {
 	syncing        []sync.Mutex
 	applyCh        chan ApplyMsg
 	lastSentCommit int
+
+	snapshot					[]byte
+	snapshotLastEntry LogEntry
 }
 
 type LogEntry struct {
@@ -114,10 +116,6 @@ func checkAsUpToDate(term1, index1, term2, index2 int) bool {
 	return index1 >= index2
 }
 
-func (rf *Raft) apply(command interface{}) {
-	// TBD
-}
-
 //
 // save Raft's persistent state to stable storage,
 // where it can later be retrieved after a crash and restart.
@@ -139,9 +137,11 @@ func (rf *Raft) persist() {
 	e.Encode(rf.currentTerm)
 	e.Encode(rf.votedFor)
 	e.Encode(rf.log)
+	e.Encode(rf.lastSentCommit)
+	e.Encode(rf.snapshotLastEntry)
 	data := w.Bytes()
 	// DPrintf("data: %v\n", data)
-	rf.persister.SaveRaftState(data)
+	rf.persister.SaveStateAndSnapshot(data, rf.snapshot)
 }
 
 //
@@ -170,13 +170,20 @@ func (rf *Raft) readPersist(data []byte) {
 	var currentTerm int
 	var votedFor int
 	var log []LogEntry
-	if d.Decode(&currentTerm) != nil || d.Decode(&votedFor) != nil || d.Decode(&log) != nil {
+	var lastSentCommit int
+	var snapshotLastEntry LogEntry
+	if d.Decode(&currentTerm) != nil ||
+		 d.Decode(&votedFor) != nil ||
+		 d.Decode(&log) != nil ||
+		 d.Decode(&lastSentCommit) != nil ||
+		 d.Decode(&snapshotLastEntry) != nil {
 		DPrintf("Decode error\n")
 	} else {
 		rf.mu.Lock()
 		rf.currentTerm = currentTerm
 		rf.votedFor = votedFor
 		rf.log = log
+		rf.lastSentCommit = lastSentCommit
 		rf.mu.Unlock()
 	}
 }
@@ -651,7 +658,6 @@ func (rf *Raft) startTryCommit() {
 				rf.commitIndex = N
 			}
 		}
-		tmp := rf.lastSentCommit
 		for rf.lastSentCommit < rf.commitIndex {
 			rf.lastSentCommit++
 			var msg ApplyMsg
@@ -660,23 +666,9 @@ func (rf *Raft) startTryCommit() {
 			msg.Command = rf.log[rf.lastSentCommit].Command
 			rf.applyCh <- msg
 		}
-		if tmp != rf.lastSentCommit {
-			DPrintf("commit  me: %d  index: %d  status: %v  logs: %d\n", rf.me, rf.lastSentCommit, rf.status, len(rf.log))
-		}
+		rf.persist()
 		rf.mu.Unlock()
 		time.Sleep(30 * time.Millisecond)
-	}
-}
-
-func (rf *Raft) startTryApply() {
-	for !rf.killed() {
-		rf.mu.Lock()
-		for rf.commitIndex > rf.lastApplied {
-			rf.lastApplied++
-			rf.apply(rf.log[rf.lastApplied])
-		}
-		rf.mu.Unlock()
-		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -715,7 +707,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	emptyEntry.Term = 0
 	rf.log = append(make([]LogEntry, 0), emptyEntry)
 	rf.commitIndex = 0
-	rf.lastApplied = 0
 
 	rf.electionTimer = time.Now()
 	rf.electionTimeout = getRandomElectionTimeout()
@@ -725,6 +716,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
+	rf.snapshot = clone(persister.ReadSnapshot())
 
 	rf.nextIndex = make([]int, len(peers))
 	rf.matchIndex = make([]int, len(peers))
@@ -737,7 +729,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	go rf.ticker()
 	go rf.startHeartBeat()
 	go rf.startTryCommit()
-	go rf.startTryApply()
 
 	return rf
 }
