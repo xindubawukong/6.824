@@ -20,6 +20,7 @@ package raft
 import (
 	//	"bytes"
 	"bytes"
+	"log"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -117,15 +118,15 @@ func checkAsUpToDate(term1, index1, term2, index2 int) bool {
 
 func (rf *Raft) lockFields(info string) {
 	rf.mu.Lock()
-	if len(info) > 0 && rf.me == 0 {
-		DPrintf("%v lock[%d]  term: %d\n", info, rf.me, rf.currentTerm)
-	}
+	// if len(info) > 0 && rf.me == 0 {
+	// 	DPrintf("%v lock[%d]  term: %d\n", info, rf.me, rf.currentTerm)
+	// }
 }
 
 func (rf *Raft) unlockFields(info string) {
-	if len(info) > 0 && rf.me == 0 {
-		DPrintf("%v unlock[%d]  term: %d\n", info, rf.me, rf.currentTerm)
-	}
+	// if len(info) > 0 && rf.me == 0 {
+	// 	DPrintf("%v unlock[%d]  term: %d\n", info, rf.me, rf.currentTerm)
+	// }
 	rf.mu.Unlock()
 }
 
@@ -206,8 +207,9 @@ func (rf *Raft) readPersist(data []byte) {
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
 	// Your code here (2D).
 	rf.lockFields("CondInstallSnapshot")
+	DPrintf("CondInstallSnapshot  me: %d  lastIndex: %d  lastTerm: %d\n", rf.me, lastIncludedIndex, lastIncludedTerm)
 	res := false
-	if rf.log[0].Index > lastIncludedIndex {
+	if rf.log[0].Index <= lastIncludedIndex {
 		res = true
 		rf.snapshot = snapshot
 		pos := binarySearch(rf.log, lastIncludedIndex)
@@ -229,9 +231,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
-	DPrintf("call Snapshot  me: %d\n", rf.me)
 	rf.lockFields("Snapshot")
-	DPrintf("Snapshot\n")
 	if index > rf.log[0].Index {
 		pos := binarySearch(rf.log, index)
 		if pos != -1 {
@@ -240,7 +240,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 			rf.persist()
 		}
 	}
-	DPrintf("Snapshot done. logs: %v\n", rf.log)
+	// DPrintf("Snapshot done. logs: %v\n", rf.log)
 	rf.unlockFields("Snapshot")
 }
 
@@ -288,7 +288,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	} else {
 		reply.VoteGranted = false
 	}
-	DPrintf("RequestVote  me: %d  candidate: %d  myterm: %d  vote: %v\n", rf.me, args.CandidateId, rf.currentTerm, reply.VoteGranted)
+	// DPrintf("RequestVote  me: %d  candidate: %d  myterm: %d  vote: %v\n", rf.me, args.CandidateId, rf.currentTerm, reply.VoteGranted)
 	rf.unlockFields("RequestVote")
 }
 
@@ -343,7 +343,7 @@ type AppendEntriesReply struct {
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	DPrintf("receive AppendEntries  me: %d\n", rf.me)
+	// DPrintf("receive AppendEntries  me: %d\n", rf.me)
 	rf.lockFields("AppendEntries")
 	if args.Term > rf.currentTerm || (rf.status == CANDIDATE && args.Term >= rf.currentTerm) {
 		rf.demote(args.Term)
@@ -405,9 +405,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	if len(args.Entries) >= 0 {
-		DPrintf("sendAppendEntries me: %d  to: %d  args: %v\n", rf.me, server, args)
-	}
+	// if len(args.Entries) >= 0 {
+	// 	DPrintf("sendAppendEntries me: %d  to: %d  args: %v\n", rf.me, server, args)
+	// }
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	return ok
 }
@@ -446,7 +446,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 }
 
 func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
-	DPrintf("sendInstallSnapshot\n")
+	DPrintf("sendInstallSnapshot  me: %d  server: %d\n", rf.me, server)
 	ok := rf.peers[server].Call("Raft.InstallSnapshot", args, reply)
 	return ok
 }
@@ -462,7 +462,7 @@ func (rf *Raft) tryStartElection() {
 		rf.electionTimer = time.Now()
 		rf.electionTimeout = getRandomElectionTimeout()
 		rf.persist()
-		DPrintf("should start election  me: %d\n", rf.me)
+		// DPrintf("should start election  me: %d\n", rf.me)
 	}
 	var args RequestVoteArgs
 	args.Term = rf.currentTerm
@@ -561,106 +561,90 @@ func (rf *Raft) trySendHeartBeat() {
 
 func (rf *Raft) trySyncLogWith(server int) {
 	rf.syncing[server].Lock()
-	// DPrintf("trySyncLogWith lock, me: %d  term: %d  server: %d\n", rf.me, rf.currentTerm, server)
 	for !rf.killed() {
 		rf.lockFields("trySyncLogWith 1")
 		shouldSend := (rf.status == LEADER) && rf.log[len(rf.log)-1].Index >= rf.nextIndex[server]
-		// if rf.status == LEADER {
-		// 	DPrintf("trySyncLogWith   shouldSend: %v  me: %d  server: %d  log: %d  nextIndex: %d  lastLog: %v\n", shouldSend, rf.me, server, len(rf.log), rf.nextIndex[server], rf.log[len(rf.log)-1])
-		// }
-		var args AppendEntriesArgs
+		shouldInstallSnapshot := false
+		var appendEntriesArgs AppendEntriesArgs
+		var installSnapshotArgs InstallSnapshotArgs
 		if shouldSend {
-			args.Term = rf.currentTerm
-			args.LeaderId = rf.me
 			prev := binarySearch(rf.log, rf.nextIndex[server]-1)
 			if prev != -1 {
-				args.PrevLogIndex = rf.log[prev].Index
-				args.PrevLogTerm = rf.log[prev].Term
-				args.Entries = rf.log[prev+1:]
+				appendEntriesArgs.Term = rf.currentTerm
+				appendEntriesArgs.LeaderId = rf.me
+				appendEntriesArgs.PrevLogIndex = rf.log[prev].Index
+				appendEntriesArgs.PrevLogTerm = rf.log[prev].Term
+				appendEntriesArgs.Entries = rf.log[prev+1:]
+				appendEntriesArgs.LeaderCommit = rf.commitIndex
 			} else {
-				args.PrevLogIndex = rf.log[len(rf.log)-1].Index
-				args.PrevLogTerm = rf.log[len(rf.log)-1].Term
-				args.Entries = make([]LogEntry, 0)
+				shouldInstallSnapshot = true
+				installSnapshotArgs.Term = rf.currentTerm
+				installSnapshotArgs.LeaderId = rf.me
+				installSnapshotArgs.LastIncludedIndex = rf.log[0].Index
+				installSnapshotArgs.LastIncludedTerm = rf.log[0].Term
+				installSnapshotArgs.Snapshot = rf.snapshot
 			}
-			args.LeaderCommit = rf.commitIndex
 		}
 		rf.unlockFields("trySyncLogWith 1")
 
-		var reply AppendEntriesReply
-		if shouldSend {
-			rf.sendAppendEntries(server, &args, &reply)
-		} else {
-			break
-		}
-
-		// DPrintf("trySyncLogWith  me: %d  server: %d  args: %v  reply: %v\n", rf.me, server, args, reply)
-
-		rf.lockFields("trySyncLogWith 2")
-		shouldBreak := false
-		shouldInstallSnapshot := false
-		if reply.Term > rf.currentTerm {
+		var appendEntriesReply AppendEntriesReply
+		var installSnapshotReply InstallSnapshotReply
+		var shouldBreak = false
+		if !shouldSend {
 			shouldBreak = true
-			rf.demote(reply.Term)
-		} else if rf.currentTerm != args.Term || rf.status != LEADER {
-			shouldBreak = true
-		} else if reply.Success {
-			shouldBreak = true
-			rf.nextIndex[server] = args.Entries[len(args.Entries)-1].Index + 1
-			rf.matchIndex[server] = args.Entries[len(args.Entries)-1].Index
-			// DPrintf("trySyncLogWith success	me: %d  to: %d  nextIndex: %d  matchIndex: %d\n", rf.me, server, rf.nextIndex[server], rf.matchIndex[server])
-		} else if reply.Term == 0 {
-			shouldBreak = false
-		} else { // optimization for nextIndex--
-			shouldBreak = false
-			updated := false
-			if len(reply.Samples) > 0 {
-				for i := 0; i < len(reply.Samples); i++ {
-					entry := reply.Samples[i]
-					pos := binarySearch(rf.log, entry.Index)
-					if pos != -1 && rf.log[pos].Term == entry.Term {
-						rf.nextIndex[server] = get_max(rf.matchIndex[server]+1, entry.Index+1)
-						updated = true
-						break
+		} else if shouldSend && !shouldInstallSnapshot {
+			rf.sendAppendEntries(server, &appendEntriesArgs, &appendEntriesReply)
+			rf.lockFields("shouldSend && !shouldInstallSnapshot")
+			if appendEntriesReply.Term > rf.currentTerm {
+				shouldBreak = true
+				rf.demote(appendEntriesReply.Term)
+			} else if rf.currentTerm != appendEntriesArgs.Term || rf.status != LEADER {
+				shouldBreak = true
+			} else if appendEntriesReply.Success {
+				shouldBreak = true
+				rf.nextIndex[server] = appendEntriesArgs.Entries[len(appendEntriesArgs.Entries)-1].Index + 1
+				rf.matchIndex[server] = appendEntriesArgs.Entries[len(appendEntriesArgs.Entries)-1].Index
+				// DPrintf("trySyncLogWith success	me: %d  to: %d  nextIndex: %d  matchIndex: %d\n", rf.me, server, rf.nextIndex[server], rf.matchIndex[server])
+			} else if appendEntriesReply.Term == 0 {
+				shouldBreak = false
+			} else { // optimization for nextIndex--
+				shouldBreak = false
+				updated := false
+				if len(appendEntriesReply.Samples) > 0 {
+					for i := 0; i < len(appendEntriesReply.Samples); i++ {
+						entry := appendEntriesReply.Samples[i]
+						pos := binarySearch(rf.log, entry.Index)
+						if pos != -1 && rf.log[pos].Term == entry.Term {
+							rf.nextIndex[server] = get_max(rf.matchIndex[server]+1, entry.Index+1)
+							updated = true
+							break
+						}
 					}
 				}
+				if !updated {
+					rf.nextIndex[server] = rf.matchIndex[server] + 1
+				}
 			}
-			if !updated {
-				shouldInstallSnapshot = true
-				rf.nextIndex[server] = rf.matchIndex[server] + 1
+			rf.unlockFields("shouldSend && !shouldInstallSnapshot")
+			if appendEntriesReply.Term == 0 {
+				time.Sleep(50 * time.Millisecond)
 			}
-			// DPrintf("syncing  me: %d  to: %d  reply: %v  new nextIndex: %d", rf.me, server, reply, rf.nextIndex[server])
-		}
-		var installSnapshotArgs InstallSnapshotArgs
-		if shouldInstallSnapshot {
-			installSnapshotArgs.Term = rf.currentTerm
-			installSnapshotArgs.LeaderId = rf.me
-			installSnapshotArgs.LastIncludedIndex = rf.log[0].Index
-			installSnapshotArgs.LastIncludedTerm = rf.log[0].Term
-			installSnapshotArgs.Snapshot = rf.snapshot
-		}
-		rf.unlockFields("trySyncLogWith 2")
-		if reply.Term == 0 {
-			time.Sleep(50 * time.Millisecond)
-		}
-		if shouldBreak {
-			break
-		}
-		if shouldInstallSnapshot {
-			var installSnapshotReply InstallSnapshotReply
-			// DPrintf("before install\n")
+		} else if shouldSend && shouldInstallSnapshot {
 			rf.sendInstallSnapshot(server, &installSnapshotArgs, &installSnapshotReply)
-			// DPrintf("after install\n")
 			rf.mu.Lock()
 			if installSnapshotReply.Term == rf.currentTerm {
-				rf.nextIndex[server] = 1
-				rf.matchIndex[server] = 0
+				rf.nextIndex[server] = rf.log[0].Index + 1
+				rf.matchIndex[server] = rf.log[0].Index
 			} else if installSnapshotReply.Term > rf.currentTerm {
 				rf.demote(installSnapshotReply.Term)
 			}
 			rf.mu.Unlock()
+			time.Sleep(100 * time.Millisecond)
+		}
+		if shouldBreak {
+			break
 		}
 	}
-	// DPrintf("sync done, me: %d  server: %d\n", rf.me, server)
 	rf.syncing[server].Unlock()
 }
 
@@ -680,7 +664,6 @@ func (rf *Raft) trySyncLogWith(server int) {
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	// Your code here (2B).
-	DPrintf("try start")
 	rf.lockFields("Start")
 	var index, term int
 	var isLeader bool
@@ -747,11 +730,6 @@ func (rf *Raft) ticker() {
 func (rf *Raft) startHeartBeat() {
 	for !rf.killed() {
 		go rf.trySendHeartBeat()
-		for i := 0; i < len(rf.peers); i++ {
-			if i != rf.me {
-				go rf.trySyncLogWith(i)
-			}
-		}
 		time.Sleep(120 * time.Millisecond)
 	}
 }
@@ -847,6 +825,12 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	for i := 0; i < len(peers); i++ {
 		rf.nextIndex[i] = rf.log[len(rf.log)-1].Index + 1
 		rf.matchIndex[i] = 0
+	}
+
+	for i := 0; i < len(rf.peers); i++ {
+		if i != rf.me {
+			go rf.trySyncLogWith(i)
+		}
 	}
 
 	// start ticker goroutine to start elections
