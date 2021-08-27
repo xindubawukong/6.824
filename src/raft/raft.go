@@ -322,8 +322,27 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 //
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	// DPrintf("sendRequestVote %d %v\n", server, args)
-	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
-	return ok
+	ch := make(chan int, 2)
+	var tmp RequestVoteReply
+	go func() {
+		ok := rf.peers[server].Call("Raft.RequestVote", args, &tmp)
+		if ok {
+			ch <- 1
+		} else {
+			ch <- 2
+		}
+	}()
+	go func() {
+		time.Sleep(REQUEST_VOTE_TIME_OUT)
+		ch <- 3
+	}()
+	t := <-ch
+	if t == 1 {
+		*reply = tmp
+		return true
+	} else {
+		return false
+	}
 }
 
 type AppendEntriesArgs struct {
@@ -404,28 +423,39 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	// if len(args.Entries) > 0 {
-	// 	DPrintf("sendAppendEntries me: %d  to: %d  args: %v\n", rf.me, server, args)
-	// }
-	now := time.Now()
-	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
-	since := time.Since(now)
-	if len(args.Entries) > 0 && since > time.Second {
-		DPrintf("sendAppendEntries got response, time = %v", since)
+	ch := make(chan int, 2)
+	var tmp AppendEntriesReply
+	go func() {
+		ok := rf.peers[server].Call("Raft.AppendEntries", args, &tmp)
+		if ok {
+			ch <- 1
+		} else {
+			ch <- 2
+		}
+	}()
+	go func() {
+		time.Sleep(APPEND_ENTRIES_TIME_OUT)
+		ch <- 3
+	}()
+	t := <-ch
+	if t == 1 {
+		*reply = tmp
+		return true
+	} else {
+		return false
 	}
-	return ok
 }
 
 type InstallSnapshotArgs struct {
-	Term         			int
-	LeaderId     			int
+	Term              int
+	LeaderId          int
 	LastIncludedIndex int
 	LastIncludedTerm  int
-	Snapshot      		[]byte
+	Snapshot          []byte
 }
 
 type InstallSnapshotReply struct {
-	Term    int
+	Term int
 }
 
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
@@ -435,7 +465,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		rf.demote(args.Term)
 	}
 	reply.Term = rf.currentTerm
-	if args.Term >= rf.currentTerm && rf.status == FOLLOWER{
+	if args.Term >= rf.currentTerm && rf.status == FOLLOWER {
 		var msg ApplyMsg
 		msg.SnapshotValid = true
 		msg.SnapshotIndex = args.LastIncludedIndex
@@ -451,14 +481,27 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 }
 
 func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
-	// DPrintf("sendInstallSnapshot  me: %d  server: %d\n", rf.me, server)
-	now := time.Now()
-	ok := rf.peers[server].Call("Raft.InstallSnapshot", args, reply)
-	since := time.Since(now)
-	if since > time.Second {
-		DPrintf("sendInstallSnapshot got response, time = %v", since)
+	ch := make(chan int, 2)
+	var tmp InstallSnapshotReply
+	go func() {
+		ok := rf.peers[server].Call("Raft.InstallSnapshot", args, &tmp)
+		if ok {
+			ch <- 1
+		} else {
+			ch <- 2
+		}
+	}()
+	go func() {
+		time.Sleep(INSTALL_SNAPSHOT_TIME_OUT)
+		ch <- 3
+	}()
+	t := <-ch
+	if t == 1 {
+		*reply = tmp
+		return true
+	} else {
+		return false
 	}
-	return ok
 }
 
 func (rf *Raft) tryStartElection() {
@@ -571,7 +614,7 @@ func (rf *Raft) trySendHeartBeat() {
 }
 
 func (rf *Raft) trySyncLogWith(server int) {
-	// rf.syncing[server].Lock()
+	rf.syncing[server].Lock()
 	for !rf.killed() {
 		rf.lockFields("trySyncLogWith 1")
 		shouldSend := (rf.status == LEADER) && rf.log[len(rf.log)-1].Index >= rf.nextIndex[server]
@@ -598,12 +641,11 @@ func (rf *Raft) trySyncLogWith(server int) {
 		}
 		rf.unlockFields("trySyncLogWith 1")
 
-		var appendEntriesReply AppendEntriesReply
-		var installSnapshotReply InstallSnapshotReply
 		var shouldBreak = false
 		if !shouldSend {
 			shouldBreak = true
 		} else if shouldSend && !shouldInstallSnapshot {
+			var appendEntriesReply AppendEntriesReply
 			rf.sendAppendEntries(server, &appendEntriesArgs, &appendEntriesReply)
 			rf.lockFields("shouldSend && !shouldInstallSnapshot")
 			if appendEntriesReply.Term > rf.currentTerm {
@@ -641,6 +683,7 @@ func (rf *Raft) trySyncLogWith(server int) {
 				time.Sleep(50 * time.Millisecond)
 			}
 		} else if shouldSend && shouldInstallSnapshot {
+			var installSnapshotReply InstallSnapshotReply
 			rf.sendInstallSnapshot(server, &installSnapshotArgs, &installSnapshotReply)
 			rf.mu.Lock()
 			if installSnapshotReply.Term == rf.currentTerm {
@@ -660,7 +703,7 @@ func (rf *Raft) trySyncLogWith(server int) {
 			break
 		}
 	}
-	// rf.syncing[server].Unlock()
+	rf.syncing[server].Unlock()
 }
 
 //
@@ -782,7 +825,7 @@ func (rf *Raft) startTryCommit() {
 		}
 		rf.persist()
 		rf.unlockFields("startTryCommit")
-		for i:= 0; i < len(msgs); i++ {
+		for i := 0; i < len(msgs); i++ {
 			msg := msgs[i]
 			rf.applyCh <- msg
 		}
