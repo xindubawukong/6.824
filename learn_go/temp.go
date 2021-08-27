@@ -2,9 +2,17 @@ package main
 
 import "fmt"
 
+type asd struct {
+	a int
+}
+
+func f(q asd) {
+	q.a = 2
+}
 
 func main() {
-	var a int = 5
-	var b int = 2
-	fmt.Println(a / b)
+	var q asd
+	q.a = 1
+	f(q)
+	fmt.Println(q.a)
 }

@@ -679,9 +679,6 @@ func (rf *Raft) trySyncLogWith(server int) {
 				}
 			}
 			rf.unlockFields("shouldSend && !shouldInstallSnapshot")
-			if appendEntriesReply.Term == 0 {
-				time.Sleep(50 * time.Millisecond)
-			}
 		} else if shouldSend && shouldInstallSnapshot {
 			var installSnapshotReply InstallSnapshotReply
 			rf.sendInstallSnapshot(server, &installSnapshotArgs, &installSnapshotReply)
