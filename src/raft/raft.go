@@ -20,6 +20,7 @@ package raft
 import (
 	//	"bytes"
 	"bytes"
+	"log"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -589,7 +590,9 @@ func (rf *Raft) trySyncLogWith(server int) {
 		var appendEntriesReply AppendEntriesReply
 		var installSnapshotReply InstallSnapshotReply
 		var shouldBreak = false
-		if shouldSend && !shouldInstallSnapshot {
+		if !shouldSend {
+			shouldBreak = true
+		} else if shouldSend && !shouldInstallSnapshot {
 			rf.sendAppendEntries(server, &appendEntriesArgs, &appendEntriesReply)
 			rf.lockFields("shouldSend && !shouldInstallSnapshot")
 			if appendEntriesReply.Term > rf.currentTerm {
@@ -627,7 +630,6 @@ func (rf *Raft) trySyncLogWith(server int) {
 				time.Sleep(50 * time.Millisecond)
 			}
 		} else if shouldSend && shouldInstallSnapshot {
-			DPrintf("EEEEEEEEEEEEEEEEEEEEEEE\n")
 			rf.sendInstallSnapshot(server, &installSnapshotArgs, &installSnapshotReply)
 			rf.mu.Lock()
 			if installSnapshotReply.Term == rf.currentTerm {
