@@ -1,6 +1,6 @@
 # 6.824
 
-Author: xiangyun.ding@gmail.com
+Author: xindubawukong@gmail.com
 
 https://pdos.csail.mit.edu/6.824/schedule.html
 
