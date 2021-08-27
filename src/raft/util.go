@@ -46,3 +46,19 @@ func getRandomElectionTimeout() time.Duration {
 	var t = int64(rand.Int()%(r-l)+l) * int64(time.Millisecond)
 	return time.Duration(t)
 }
+
+func binarySearch(log []LogEntry, index int) int {
+	l := 0
+	r := len(log) - 1
+	for l <= r {
+		m := (l + r) / 2
+		if index == log[m].Index {
+			return m
+		} else if index < log[m].Index {
+			r = m - 1
+		} else {
+			l = m + 1
+		}
+	}
+	return -1
+}
