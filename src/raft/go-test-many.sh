@@ -37,7 +37,8 @@
 # By now, you know everything that happens below.
 # If you still want to read the code, go ahead.
 
-rm -rf ./tmp/*.err ./tmp/*.log
+rm -rf ./tmp
+mkdir tmp
 
 if [ $# -eq 1 ] && [ "$1" = "--help" ]; then
 	echo "Usage: $0 [RUNS=100] [PARALLELISM=#cpus] [TESTPATTERN='']"
