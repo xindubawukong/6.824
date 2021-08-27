@@ -48,8 +48,8 @@ func getRandomElectionTimeout() time.Duration {
 }
 
 const REQUEST_VOTE_TIME_OUT = 10000 * time.Millisecond
-const APPEND_ENTRIES_TIME_OUT = 100 * time.Millisecond
-const INSTALL_SNAPSHOT_TIME_OUT = 200 * time.Millisecond
+const APPEND_ENTRIES_TIME_OUT = 200 * time.Millisecond
+const INSTALL_SNAPSHOT_TIME_OUT = 400 * time.Millisecond
 
 func binarySearch(log []LogEntry, index int) int {
 	l := 0

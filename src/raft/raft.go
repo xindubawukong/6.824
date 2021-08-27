@@ -219,7 +219,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 		}
 		rf.persist()
 	}
-	DPrintf("CondInstallSnapshot  me: %d  lastIndex: %d  lastTerm: %d  res: %v\n", rf.me, lastIncludedIndex, lastIncludedTerm, res)
+	// DPrintf("CondInstallSnapshot  me: %d  lastIndex: %d  lastTerm: %d  res: %v\n", rf.me, lastIncludedIndex, lastIncludedTerm, res)
 	rf.unlockFields("CondInstallSnapshot")
 	return res
 }
@@ -423,6 +423,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+	// if len(args.Entries) > 0 {
+	// 	DPrintf("sendAppendEntries  me: %d  server: %d  args: %v\n", rf.me, server, args)
+	// }
 	ch := make(chan int, 2)
 	var tmp AppendEntriesReply
 	go func() {
@@ -440,8 +443,14 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	t := <-ch
 	if t == 1 {
 		*reply = tmp
+		// if len(args.Entries) > 0 {
+		// 	DPrintf("sendAppendEntries  me: %d  server: %d  reply: %v\n", rf.me, server, reply)
+		// }
 		return true
 	} else {
+		// if len(args.Entries) > 0 {
+		// 	DPrintf("sendAppendEntries  me: %d  server: %d  fail!", rf.me, server)
+		// }
 		return false
 	}
 }
@@ -481,6 +490,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 }
 
 func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
+	// DPrintf("sendInstallSnapshot  me: %d  server: %d  args: %v\n", rf.me, server, args)
 	ch := make(chan int, 2)
 	var tmp InstallSnapshotReply
 	go func() {
@@ -498,8 +508,10 @@ func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply
 	t := <-ch
 	if t == 1 {
 		*reply = tmp
+		// DPrintf("sendInstallSnapshot  me: %d  server: %d  success!\n", rf.me, server)
 		return true
 	} else {
+		// DPrintf("sendInstallSnapshot  me: %d  server: %d  fail!\n", rf.me, server)
 		return false
 	}
 }
@@ -657,7 +669,6 @@ func (rf *Raft) trySyncLogWith(server int) {
 				shouldBreak = true
 				rf.nextIndex[server] = appendEntriesArgs.Entries[len(appendEntriesArgs.Entries)-1].Index + 1
 				rf.matchIndex[server] = appendEntriesArgs.Entries[len(appendEntriesArgs.Entries)-1].Index
-				// DPrintf("trySyncLogWith success	me: %d  to: %d  nextIndex: %d  matchIndex: %d\n", rf.me, server, rf.nextIndex[server], rf.matchIndex[server])
 			} else if appendEntriesReply.Term == 0 {
 				shouldBreak = false
 			} else { // optimization for nextIndex--
@@ -677,6 +688,7 @@ func (rf *Raft) trySyncLogWith(server int) {
 				if !updated {
 					rf.nextIndex[server] = rf.matchIndex[server] + 1
 				}
+				// DPrintf("trySyncLogWith failed. 	me: %d  to: %d  nextIndex: %d  matchIndex: %d\n", rf.me, server, rf.nextIndex[server], rf.matchIndex[server])
 			}
 			rf.unlockFields("shouldSend && !shouldInstallSnapshot")
 		} else if shouldSend && shouldInstallSnapshot {
@@ -684,9 +696,11 @@ func (rf *Raft) trySyncLogWith(server int) {
 			rf.sendInstallSnapshot(server, &installSnapshotArgs, &installSnapshotReply)
 			rf.mu.Lock()
 			if installSnapshotReply.Term == rf.currentTerm {
-				rf.nextIndex[server] = rf.log[0].Index + 1
-				rf.matchIndex[server] = rf.log[0].Index
+				rf.nextIndex[server] = installSnapshotArgs.LastIncludedIndex + 1
+				rf.matchIndex[server] = installSnapshotArgs.LastIncludedIndex
 				// DPrintf("nextIndex: %d  matchIndex: %d\n", rf.nextIndex[server], rf.matchIndex[server])
+			} else if installSnapshotReply.Term == 0 {
+				shouldBreak = false
 			} else {
 				shouldBreak = true
 				if installSnapshotReply.Term > rf.currentTerm {
