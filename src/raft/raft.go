@@ -20,7 +20,6 @@ package raft
 import (
 	//	"bytes"
 	"bytes"
-	"log"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -207,7 +206,6 @@ func (rf *Raft) readPersist(data []byte) {
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
 	// Your code here (2D).
 	rf.lockFields("CondInstallSnapshot")
-	DPrintf("CondInstallSnapshot  me: %d  lastIndex: %d  lastTerm: %d\n", rf.me, lastIncludedIndex, lastIncludedTerm)
 	res := false
 	if rf.log[0].Index <= lastIncludedIndex {
 		res = true
@@ -221,6 +219,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 		}
 		rf.persist()
 	}
+	DPrintf("CondInstallSnapshot  me: %d  lastIndex: %d  lastTerm: %d  res: %v\n", rf.me, lastIncludedIndex, lastIncludedTerm, res)
 	rf.unlockFields("CondInstallSnapshot")
 	return res
 }
@@ -405,10 +404,15 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	// if len(args.Entries) >= 0 {
+	// if len(args.Entries) > 0 {
 	// 	DPrintf("sendAppendEntries me: %d  to: %d  args: %v\n", rf.me, server, args)
 	// }
+	now := time.Now()
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	since := time.Since(now)
+	if len(args.Entries) > 0 && since > time.Second {
+		DPrintf("sendAppendEntries got response, time = %v", since)
+	}
 	return ok
 }
 
@@ -430,6 +434,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	if args.Term > rf.currentTerm {
 		rf.demote(args.Term)
 	}
+	reply.Term = rf.currentTerm
 	if args.Term >= rf.currentTerm && rf.status == FOLLOWER{
 		var msg ApplyMsg
 		msg.SnapshotValid = true
@@ -446,8 +451,13 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 }
 
 func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
-	DPrintf("sendInstallSnapshot  me: %d  server: %d\n", rf.me, server)
+	// DPrintf("sendInstallSnapshot  me: %d  server: %d\n", rf.me, server)
+	now := time.Now()
 	ok := rf.peers[server].Call("Raft.InstallSnapshot", args, reply)
+	since := time.Since(now)
+	if since > time.Second {
+		DPrintf("sendInstallSnapshot got response, time = %v", since)
+	}
 	return ok
 }
 
@@ -505,9 +515,10 @@ func (rf *Raft) tryStartElection() {
 				if i != rf.me {
 					rf.nextIndex[i] = rf.log[len(rf.log)-1].Index + 1
 					rf.matchIndex[i] = 0
+					go rf.trySyncLogWith(i)
 				}
 			}
-			DPrintf("!!!! %d became leader!  Term: %d\n", rf.me, rf.currentTerm)
+			// DPrintf("!!!! %d became leader!  Term: %d\n", rf.me, rf.currentTerm)
 		}
 		rf.unlockFields("tryStartElection 2")
 		if len(replies) == len(rf.peers)-1 {
@@ -560,7 +571,7 @@ func (rf *Raft) trySendHeartBeat() {
 }
 
 func (rf *Raft) trySyncLogWith(server int) {
-	rf.syncing[server].Lock()
+	// rf.syncing[server].Lock()
 	for !rf.killed() {
 		rf.lockFields("trySyncLogWith 1")
 		shouldSend := (rf.status == LEADER) && rf.log[len(rf.log)-1].Index >= rf.nextIndex[server]
@@ -635,17 +646,21 @@ func (rf *Raft) trySyncLogWith(server int) {
 			if installSnapshotReply.Term == rf.currentTerm {
 				rf.nextIndex[server] = rf.log[0].Index + 1
 				rf.matchIndex[server] = rf.log[0].Index
-			} else if installSnapshotReply.Term > rf.currentTerm {
-				rf.demote(installSnapshotReply.Term)
+				// DPrintf("nextIndex: %d  matchIndex: %d\n", rf.nextIndex[server], rf.matchIndex[server])
+			} else {
+				shouldBreak = true
+				if installSnapshotReply.Term > rf.currentTerm {
+					rf.demote(installSnapshotReply.Term)
+				}
 			}
 			rf.mu.Unlock()
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond)
 		}
 		if shouldBreak {
 			break
 		}
 	}
-	rf.syncing[server].Unlock()
+	// rf.syncing[server].Unlock()
 }
 
 //
@@ -665,6 +680,7 @@ func (rf *Raft) trySyncLogWith(server int) {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	// Your code here (2B).
 	rf.lockFields("Start")
+	// DPrintf("Start  me: %d  command: %v\n", rf.me, command)
 	var index, term int
 	var isLeader bool
 	if rf.status == LEADER {
@@ -825,12 +841,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	for i := 0; i < len(peers); i++ {
 		rf.nextIndex[i] = rf.log[len(rf.log)-1].Index + 1
 		rf.matchIndex[i] = 0
-	}
-
-	for i := 0; i < len(rf.peers); i++ {
-		if i != rf.me {
-			go rf.trySyncLogWith(i)
-		}
 	}
 
 	// start ticker goroutine to start elections
