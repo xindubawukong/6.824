@@ -72,6 +72,7 @@ type Raft struct {
 	votedFor    int
 	log         []LogEntry
 	commitIndex int
+	lastApplied int
 	nextIndex   []int
 	matchIndex  []int
 
@@ -80,7 +81,6 @@ type Raft struct {
 
 	syncing        []sync.Mutex
 	applyCh        chan ApplyMsg
-	lastSentCommit int
 
 	snapshot []byte
 }
@@ -151,7 +151,6 @@ func (rf *Raft) persist() {
 	e.Encode(rf.currentTerm)
 	e.Encode(rf.votedFor)
 	e.Encode(rf.log)
-	e.Encode(rf.lastSentCommit)
 	data := w.Bytes()
 	// DPrintf("data: %v\n", data)
 	rf.persister.SaveStateAndSnapshot(data, rf.snapshot)
@@ -183,18 +182,15 @@ func (rf *Raft) readPersist(data []byte) {
 	var currentTerm int
 	var votedFor int
 	var log []LogEntry
-	var lastSentCommit int
 	if d.Decode(&currentTerm) != nil ||
 		d.Decode(&votedFor) != nil ||
-		d.Decode(&log) != nil ||
-		d.Decode(&lastSentCommit) != nil {
+		d.Decode(&log) != nil {
 		DPrintf("Decode error\n")
 	} else {
 		rf.lockFields("readPersist")
 		rf.currentTerm = currentTerm
 		rf.votedFor = votedFor
 		rf.log = log
-		rf.lastSentCommit = lastSentCommit
 		rf.unlockFields("readPersist")
 	}
 }
@@ -207,7 +203,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	// Your code here (2D).
 	rf.lockFields("CondInstallSnapshot")
 	res := false
-	if rf.log[0].Index <= lastIncludedIndex {
+	if lastIncludedIndex > rf.log[0].Index && lastIncludedIndex > rf.commitIndex {
 		res = true
 		rf.snapshot = snapshot
 		pos := binarySearch(rf.log, lastIncludedIndex)
@@ -217,6 +213,8 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 			rf.log = make([]LogEntry, 0)
 			rf.log = append(rf.log, LogEntry{nil, lastIncludedIndex, lastIncludedTerm})
 		}
+		rf.lastApplied = lastIncludedIndex
+		rf.commitIndex = lastIncludedIndex
 		rf.persist()
 	}
 	// DPrintf("CondInstallSnapshot  me: %d  lastIndex: %d  lastTerm: %d  res: %v\n", rf.me, lastIncludedIndex, lastIncludedTerm, res)
@@ -824,9 +822,9 @@ func (rf *Raft) startTryCommit() {
 				rf.commitIndex = N
 			}
 		}
-		for rf.lastSentCommit < rf.commitIndex {
-			rf.lastSentCommit++
-			pos := binarySearch(rf.log, rf.lastSentCommit)
+		for rf.lastApplied < rf.commitIndex {
+			rf.lastApplied++
+			pos := binarySearch(rf.log, rf.lastApplied)
 			if pos != -1 {
 				var msg ApplyMsg
 				msg.CommandValid = true
@@ -880,12 +878,12 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	emptyEntry.Term = 0
 	rf.log = append(make([]LogEntry, 0), emptyEntry)
 	rf.commitIndex = 0
+	rf.lastApplied = 0
 
 	rf.electionTimer = time.Now()
 	rf.electionTimeout = getRandomElectionTimeout()
 
 	rf.syncing = make([]sync.Mutex, len(peers))
-	rf.lastSentCommit = 0
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
