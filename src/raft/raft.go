@@ -154,7 +154,7 @@ func (rf *Raft) persist() {
 	e.Encode(rf.lastSentCommit)
 	data := w.Bytes()
 	// DPrintf("data: %v\n", data)
-	go rf.persister.SaveStateAndSnapshot(data, rf.snapshot)
+	rf.persister.SaveStateAndSnapshot(data, rf.snapshot)
 }
 
 //
@@ -423,9 +423,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	// if len(args.Entries) > 0 {
-	// 	DPrintf("sendAppendEntries  me: %d  server: %d  args: %v\n", rf.me, server, args)
-	// }
+	if len(args.Entries) > 0 {
+		DPrintf("sendAppendEntries  me: %d  server: %d  args: %v\n", rf.me, server, args)
+	}
 	ch := make(chan int, 2)
 	var tmp AppendEntriesReply
 	go func() {
@@ -443,14 +443,14 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	t := <-ch
 	if t == 1 {
 		*reply = tmp
-		// if len(args.Entries) > 0 {
-		// 	DPrintf("sendAppendEntries  me: %d  server: %d  reply: %v\n", rf.me, server, reply)
-		// }
+		if len(args.Entries) > 0 {
+			DPrintf("sendAppendEntries  me: %d  server: %d  reply: %v\n", rf.me, server, reply)
+		}
 		return true
 	} else {
-		// if len(args.Entries) > 0 {
-		// 	DPrintf("sendAppendEntries  me: %d  server: %d  fail!", rf.me, server)
-		// }
+		if len(args.Entries) > 0 {
+			DPrintf("sendAppendEntries  me: %d  server: %d  fail!", rf.me, server)
+		}
 		return false
 	}
 }
@@ -573,7 +573,7 @@ func (rf *Raft) tryStartElection() {
 					go rf.trySyncLogWith(i)
 				}
 			}
-			// DPrintf("!!!! %d became leader!  Term: %d\n", rf.me, rf.currentTerm)
+			DPrintf("!!!! %d became leader!  Term: %d\n", rf.me, rf.currentTerm)
 		}
 		rf.unlockFields("tryStartElection 2")
 		if len(replies) == len(rf.peers)-1 {
@@ -688,10 +688,11 @@ func (rf *Raft) trySyncLogWith(server int) {
 				if !updated {
 					rf.nextIndex[server] = rf.matchIndex[server] + 1
 				}
-				// DPrintf("trySyncLogWith failed. 	me: %d  to: %d  nextIndex: %d  matchIndex: %d\n", rf.me, server, rf.nextIndex[server], rf.matchIndex[server])
+				DPrintf("trySyncLogWith failed. 	me: %d  to: %d  nextIndex: %d  matchIndex: %d\n", rf.me, server, rf.nextIndex[server], rf.matchIndex[server])
 			}
 			rf.unlockFields("shouldSend && !shouldInstallSnapshot")
 		} else if shouldSend && shouldInstallSnapshot {
+			DPrintf("error snapshot\n")
 			var installSnapshotReply InstallSnapshotReply
 			rf.sendInstallSnapshot(server, &installSnapshotArgs, &installSnapshotReply)
 			rf.mu.Lock()
