@@ -203,7 +203,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	// Your code here (2D).
 	rf.lockFields("CondInstallSnapshot")
 	res := false
-	if lastIncludedIndex > rf.log[0].Index && lastIncludedIndex > rf.commitIndex {
+	if lastIncludedIndex > rf.log[0].Index && lastIncludedIndex >= rf.commitIndex {
 		res = true
 		rf.snapshot = snapshot
 		pos := binarySearch(rf.log, lastIncludedIndex)
@@ -217,7 +217,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 		rf.commitIndex = lastIncludedIndex
 		rf.persist()
 	}
-	// DPrintf("CondInstallSnapshot  me: %d  lastIndex: %d  lastTerm: %d  res: %v\n", rf.me, lastIncludedIndex, lastIncludedTerm, res)
+	DPrintf("CondInstallSnapshot  me: %d  lastIndex: %d  lastTerm: %d  res: %v\n", rf.me, lastIncludedIndex, lastIncludedTerm, res)
 	rf.unlockFields("CondInstallSnapshot")
 	return res
 }
@@ -237,7 +237,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 			rf.persist()
 		}
 	}
-	// DPrintf("Snapshot done. logs: %v\n", rf.log)
+	DPrintf("Snapshot done. me: %d\n", rf.me)
 	rf.unlockFields("Snapshot")
 }
 
@@ -410,7 +410,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 				} else {
 					rf.commitIndex = get_min(args.LeaderCommit, args.PrevLogIndex)
 				}
-				// DPrintf("me: %d  commitIndex: %d\n", rf.me, rf.commitIndex)
+				DPrintf("me: %d  commitIndex: %d\n", rf.me, rf.commitIndex)
 			}
 		}
 	}
@@ -488,7 +488,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 }
 
 func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
-	// DPrintf("sendInstallSnapshot  me: %d  server: %d  args: %v\n", rf.me, server, args)
+	DPrintf("sendInstallSnapshot  me: %d  server: %d  args: %v\n", rf.me, server, args)
 	ch := make(chan int, 2)
 	var tmp InstallSnapshotReply
 	go func() {
@@ -506,10 +506,10 @@ func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply
 	t := <-ch
 	if t == 1 {
 		*reply = tmp
-		// DPrintf("sendInstallSnapshot  me: %d  server: %d  success!\n", rf.me, server)
+		DPrintf("sendInstallSnapshot  me: %d  server: %d  success!\n", rf.me, server)
 		return true
 	} else {
-		// DPrintf("sendInstallSnapshot  me: %d  server: %d  fail!\n", rf.me, server)
+		DPrintf("sendInstallSnapshot  me: %d  server: %d  fail!\n", rf.me, server)
 		return false
 	}
 }
@@ -690,7 +690,6 @@ func (rf *Raft) trySyncLogWith(server int) {
 			}
 			rf.unlockFields("shouldSend && !shouldInstallSnapshot")
 		} else if shouldSend && shouldInstallSnapshot {
-			DPrintf("error snapshot\n")
 			var installSnapshotReply InstallSnapshotReply
 			rf.sendInstallSnapshot(server, &installSnapshotArgs, &installSnapshotReply)
 			rf.mu.Lock()
@@ -825,7 +824,7 @@ func (rf *Raft) startTryCommit() {
 		for rf.lastApplied < rf.commitIndex {
 			rf.lastApplied++
 			pos := binarySearch(rf.log, rf.lastApplied)
-			if pos != -1 {
+			if pos > 0 {
 				var msg ApplyMsg
 				msg.CommandValid = true
 				msg.CommandIndex = rf.log[pos].Index
@@ -833,7 +832,6 @@ func (rf *Raft) startTryCommit() {
 				msgs = append(msgs, msg)
 			}
 		}
-		rf.persist()
 		rf.unlockFields("startTryCommit")
 		for i := 0; i < len(msgs); i++ {
 			msg := msgs[i]
