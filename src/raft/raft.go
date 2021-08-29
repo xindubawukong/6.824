@@ -79,8 +79,8 @@ type Raft struct {
 	electionTimer   time.Time
 	electionTimeout time.Duration
 
-	syncing        []sync.Mutex
-	applyCh        chan ApplyMsg
+	syncing []sync.Mutex
+	applyCh chan ApplyMsg
 
 	snapshot []byte
 }
@@ -584,12 +584,14 @@ func (rf *Raft) trySendHeartBeat() {
 	rf.lockFields("trySendHeartBeat")
 	shouldSend := rf.status == LEADER
 	var args AppendEntriesArgs
-	args.Term = rf.currentTerm
-	args.LeaderId = rf.me
-	args.PrevLogIndex = rf.log[len(rf.log)-1].Index
-	args.PrevLogTerm = rf.log[len(rf.log)-1].Term
-	args.Entries = make([]LogEntry, 0)
-	args.LeaderCommit = rf.commitIndex
+	if shouldSend {
+		args.Term = rf.currentTerm
+		args.LeaderId = rf.me
+		args.PrevLogIndex = rf.log[len(rf.log)-1].Index
+		args.PrevLogTerm = rf.log[len(rf.log)-1].Term
+		args.Entries = make([]LogEntry, 0)
+		args.LeaderCommit = rf.commitIndex
+	}
 	rf.unlockFields("trySendHeartBeat")
 	// if shouldSend {
 	// 	DPrintf("trySendHeartBeat %d %v\n", rf.me, shouldSend)
@@ -598,27 +600,20 @@ func (rf *Raft) trySendHeartBeat() {
 		return
 	}
 
-	var ch = make(chan AppendEntriesReply)
 	for i := 0; i < len(rf.peers); i++ {
 		if i != rf.me {
 			go func(server int, args AppendEntriesArgs) {
 				var reply AppendEntriesReply
 				rf.sendAppendEntries(server, &args, &reply)
-				ch <- reply
+				rf.lockFields("trySendHeartBeat")
+				if rf.currentTerm == reply.Term && reply.Success {
+					rf.matchIndex[server] = get_max(rf.matchIndex[server], args.PrevLogIndex)
+				}
+				if reply.Term > rf.currentTerm {
+					rf.demote(reply.Term)
+				}
+				rf.unlockFields("trySendHeartBeat")
 			}(i, args)
-		}
-	}
-
-	var replies = make([]AppendEntriesReply, 0)
-	for reply := range ch {
-		rf.mu.Lock()
-		if reply.Term > rf.currentTerm {
-			rf.demote(reply.Term)
-		}
-		rf.mu.Unlock()
-		replies = append(replies, reply)
-		if len(replies) == len(rf.peers)-1 {
-			break
 		}
 	}
 }
@@ -695,7 +690,6 @@ func (rf *Raft) trySyncLogWith(server int) {
 			rf.mu.Lock()
 			if installSnapshotReply.Term == rf.currentTerm {
 				rf.nextIndex[server] = installSnapshotArgs.LastIncludedIndex + 1
-				rf.matchIndex[server] = installSnapshotArgs.LastIncludedIndex
 				// DPrintf("nextIndex: %d  matchIndex: %d\n", rf.nextIndex[server], rf.matchIndex[server])
 			} else if installSnapshotReply.Term == 0 {
 				shouldBreak = false
