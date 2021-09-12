@@ -5,9 +5,9 @@ import (
 )
 
 func main() {
-	var a map[string]string
-	a = make(map[string]string)
-	a["123"] = "asd"
-	a["456"] = "qwe"
-	fmt.Println(a)
+	a := make([]int, 0)
+	a = append(a, 2)
+	fmt.Println(a[0:])
+	fmt.Println(a[1:])
+	fmt.Println(a[2:])
 }

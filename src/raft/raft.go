@@ -585,49 +585,11 @@ func (rf *Raft) tryStartElection() {
 	}
 }
 
-func (rf *Raft) trySendHeartBeat() {
-	rf.lockFields("trySendHeartBeat")
-	shouldSend := rf.status == LEADER
-	var args AppendEntriesArgs
-	if shouldSend {
-		args.Term = rf.currentTerm
-		args.LeaderId = rf.me
-		args.PrevLogIndex = rf.log[len(rf.log)-1].Index
-		args.PrevLogTerm = rf.log[len(rf.log)-1].Term
-		args.Entries = make([]LogEntry, 0)
-		args.LeaderCommit = rf.commitIndex
-	}
-	rf.unlockFields("trySendHeartBeat")
-	// if shouldSend {
-	// 	DPrintf("trySendHeartBeat %d %v\n", rf.me, shouldSend)
-	// }
-	if !shouldSend {
-		return
-	}
-
-	for i := 0; i < len(rf.peers); i++ {
-		if i != rf.me {
-			go func(server int, args AppendEntriesArgs) {
-				var reply AppendEntriesReply
-				rf.sendAppendEntries(server, &args, &reply)
-				rf.lockFields("trySendHeartBeat")
-				if rf.currentTerm == reply.Term && reply.Success {
-					rf.matchIndex[server] = get_max(rf.matchIndex[server], args.PrevLogIndex)
-				}
-				if reply.Term > rf.currentTerm {
-					rf.demote(reply.Term)
-				}
-				rf.unlockFields("trySendHeartBeat")
-			}(i, args)
-		}
-	}
-}
-
 func (rf *Raft) trySyncLogWith(server int) {
 	rf.syncing[server].Lock()
 	for !rf.killed() {
 		rf.lockFields("trySyncLogWith 1")
-		shouldSend := (rf.status == LEADER) && rf.log[len(rf.log)-1].Index >= rf.nextIndex[server]
+		shouldSend := (rf.status == LEADER) && rf.log[len(rf.log)-1].Index >= rf.nextIndex[server] - 1
 		shouldInstallSnapshot := false
 		var appendEntriesArgs AppendEntriesArgs
 		var installSnapshotArgs InstallSnapshotArgs
@@ -665,8 +627,12 @@ func (rf *Raft) trySyncLogWith(server int) {
 				shouldBreak = true
 			} else if appendEntriesReply.Success {
 				shouldBreak = true
-				rf.nextIndex[server] = appendEntriesArgs.Entries[len(appendEntriesArgs.Entries)-1].Index + 1
-				rf.matchIndex[server] = appendEntriesArgs.Entries[len(appendEntriesArgs.Entries)-1].Index
+				if len(appendEntriesArgs.Entries) > 0 {
+					rf.nextIndex[server] = appendEntriesArgs.Entries[len(appendEntriesArgs.Entries)-1].Index + 1
+					rf.matchIndex[server] = appendEntriesArgs.Entries[len(appendEntriesArgs.Entries)-1].Index
+				} else {
+					rf.matchIndex[server] = appendEntriesArgs.PrevLogIndex
+				}
 			} else if appendEntriesReply.Term == 0 {
 				shouldBreak = false
 			} else { // optimization for nextIndex--
@@ -796,7 +762,11 @@ func (rf *Raft) ticker() {
 
 func (rf *Raft) startHeartBeat() {
 	for !rf.killed() {
-		go rf.trySendHeartBeat()
+		for i := 0; i < len(rf.peers); i++ {
+			if i != rf.me {
+				go rf.trySyncLogWith(i)
+			}
+		}
 		time.Sleep(120 * time.Millisecond)
 	}
 }
