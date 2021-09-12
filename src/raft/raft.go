@@ -91,6 +91,11 @@ type LogEntry struct {
 	Term    int
 }
 
+func (rf *Raft) IsLeader() bool {
+	_, isLeader := rf.GetState()
+	return isLeader
+}
+
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
@@ -410,7 +415,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 				} else {
 					rf.commitIndex = get_min(args.LeaderCommit, args.PrevLogIndex)
 				}
-				DPrintf("me: %d  commitIndex: %d\n", rf.me, rf.commitIndex)
+				// DPrintf("me: %d  commitIndex: %d\n", rf.me, rf.commitIndex)
 			}
 		}
 	}
@@ -421,9 +426,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	if len(args.Entries) > 0 {
-		DPrintf("sendAppendEntries  me: %d  server: %d  args: %v\n", rf.me, server, args)
-	}
+	// if len(args.Entries) > 0 {
+	// 	DPrintf("sendAppendEntries  me: %d  server: %d  args: %v\n", rf.me, server, args)
+	// }
 	ch := make(chan int, 2)
 	var tmp AppendEntriesReply
 	go func() {
@@ -441,14 +446,14 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	t := <-ch
 	if t == 1 {
 		*reply = tmp
-		if len(args.Entries) > 0 {
-			DPrintf("sendAppendEntries  me: %d  server: %d  reply: %v\n", rf.me, server, reply)
-		}
+		// if len(args.Entries) > 0 {
+		// 	DPrintf("sendAppendEntries  me: %d  server: %d  reply: %v\n", rf.me, server, reply)
+		// }
 		return true
 	} else {
-		if len(args.Entries) > 0 {
-			DPrintf("sendAppendEntries  me: %d  server: %d  fail!", rf.me, server)
-		}
+		// if len(args.Entries) > 0 {
+		// 	DPrintf("sendAppendEntries  me: %d  server: %d  fail!", rf.me, server)
+		// }
 		return false
 	}
 }
@@ -488,7 +493,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 }
 
 func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
-	DPrintf("sendInstallSnapshot  me: %d  server: %d  args: %v\n", rf.me, server, args)
+	// DPrintf("sendInstallSnapshot  me: %d  server: %d  args: %v\n", rf.me, server, args)
 	ch := make(chan int, 2)
 	var tmp InstallSnapshotReply
 	go func() {
@@ -506,10 +511,10 @@ func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply
 	t := <-ch
 	if t == 1 {
 		*reply = tmp
-		DPrintf("sendInstallSnapshot  me: %d  server: %d  success!\n", rf.me, server)
+		// DPrintf("sendInstallSnapshot  me: %d  server: %d  success!\n", rf.me, server)
 		return true
 	} else {
-		DPrintf("sendInstallSnapshot  me: %d  server: %d  fail!\n", rf.me, server)
+		// DPrintf("sendInstallSnapshot  me: %d  server: %d  fail!\n", rf.me, server)
 		return false
 	}
 }
@@ -681,7 +686,7 @@ func (rf *Raft) trySyncLogWith(server int) {
 				if !updated {
 					rf.nextIndex[server] = rf.matchIndex[server] + 1
 				}
-				DPrintf("trySyncLogWith failed. 	me: %d  to: %d  nextIndex: %d  matchIndex: %d\n", rf.me, server, rf.nextIndex[server], rf.matchIndex[server])
+				// DPrintf("trySyncLogWith failed. 	me: %d  to: %d  nextIndex: %d  matchIndex: %d\n", rf.me, server, rf.nextIndex[server], rf.matchIndex[server])
 			}
 			rf.unlockFields("shouldSend && !shouldInstallSnapshot")
 		} else if shouldSend && shouldInstallSnapshot {
@@ -831,7 +836,7 @@ func (rf *Raft) startTryCommit() {
 			msg := msgs[i]
 			rf.applyCh <- msg
 		}
-		time.Sleep(30 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -848,7 +853,7 @@ func (rf *Raft) startTryCommit() {
 //
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
-	DPrintf("start server %d\n", me)
+	DPrintf("Start Raft Server %d\n", me)
 	if len(peers) == 0 {
 		DPrintf("no peers!\n")
 		return nil

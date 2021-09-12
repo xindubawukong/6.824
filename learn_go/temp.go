@@ -1,18 +1,13 @@
 package main
 
-import "fmt"
-
-type asd struct {
-	a int
-}
-
-func f(q asd) {
-	q.a = 2
-}
+import (
+	"fmt"
+)
 
 func main() {
-	var q asd
-	q.a = 1
-	f(q)
-	fmt.Println(q.a)
+	var a map[string]string
+	a = make(map[string]string)
+	a["123"] = "asd"
+	a["456"] = "qwe"
+	fmt.Println(a)
 }

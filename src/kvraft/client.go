@@ -1,13 +1,21 @@
 package kvraft
 
-import "6.824/labrpc"
-import "crypto/rand"
-import "math/big"
+import (
+	"crypto/rand"
+	"fmt"
+	"math/big"
+	"sync/atomic"
+	"time"
 
+	"6.824/labrpc"
+)
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
+	clientId   string
+	opCnt      int64
+	lastLeader int
 }
 
 func nrand() int64 {
@@ -21,7 +29,13 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
 	// You'll have to add code here.
+	ck.clientId = fmt.Sprintf("Clerk[%d]", nrand())
 	return ck
+}
+
+func (ck *Clerk) getNextOpId() string {
+	tmp := atomic.AddInt64(&ck.opCnt, 1)
+	return fmt.Sprintf("%v_Op[%d]", ck.clientId, tmp)
 }
 
 //
@@ -37,9 +51,28 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) Get(key string) string {
-
+	// DPrintf(">> Clerk Get, key: %v\n", key)
 	// You will have to modify this function.
-	return ""
+	var args GetArgs
+	args.Key = key
+	args.ClientId = ck.clientId
+	args.OpId = ck.getNextOpId()
+	var reply GetReply
+	for {
+		ok := ck.servers[ck.lastLeader].Call("KVServer.Get", &args, &reply)
+		if !ok {
+			time.Sleep(50 * time.Millisecond)
+		} else if reply.Err == ErrWrongLeader {
+			ck.lastLeader = (ck.lastLeader + 1) % len(ck.servers)
+		} else {
+			break
+		}
+	}
+	if reply.Err == OK {
+		return reply.Value
+	} else {
+		return ""
+	}
 }
 
 //
@@ -53,7 +86,25 @@ func (ck *Clerk) Get(key string) string {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
+	// DPrintf(">> Clerk PutAppend, key: %v, value: %v\n", key, value)
 	// You will have to modify this function.
+	var args PutAppendArgs
+	args.Key = key
+	args.Value = value
+	args.Op = op
+	args.ClientId = ck.clientId
+	args.OpId = ck.getNextOpId()
+	var reply PutAppendReply
+	for {
+		ok := ck.servers[ck.lastLeader].Call("KVServer.PutAppend", &args, &reply)
+		if !ok {
+			time.Sleep(50 * time.Millisecond)
+		} else if reply.Err == ErrWrongLeader {
+			ck.lastLeader = (ck.lastLeader + 1) % len(ck.servers)
+		} else {
+			break
+		}
+	}
 }
 
 func (ck *Clerk) Put(key string, value string) {
