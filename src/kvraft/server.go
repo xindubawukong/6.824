@@ -1,6 +1,7 @@
 package kvraft
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,21 +17,20 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
-	Op string // "Get", "Put" or "Append"
-	Key string
-	Value string
+	Op       string // "Get", "Put" or "Append"
+	Key      string
+	Value    string
 	ClientId string
-	OpId string
+	OpId     string
 }
 
 type Response struct {
-	opId string
-	err string
+	opId  string
+	err   string
 	value string
 }
 
@@ -44,29 +44,31 @@ type KVServer struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
-	kvMap	map[string]string
-	result map[int]chan string
-	responseHistory map[string] Response
+	kvMap           map[string]string
+	result          map[string]chan string
+	responseHistory map[string]Response
 }
 
-func (kv *KVServer) getResultChannel(index int) chan string {
+func (kv *KVServer) getResultChannel(term, index int) chan string {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	ch, ok := kv.result[index]
+	key := fmt.Sprintf("%d,%d", term, index)
+	ch, ok := kv.result[key]
 	if ok {
 		return ch
 	}
-	ch = make(chan string)
-	kv.result[index] = ch
+	ch = make(chan string, 1)
+	kv.result[key] = ch
 	return ch
 }
 
-func (kv *KVServer) deleteResultChannel(index int) {
+func (kv *KVServer) deleteResultChannel(term, index int) {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	_, ok := kv.result[index]
+	key := fmt.Sprintf("%d,%d", term, index)
+	_, ok := kv.result[key]
 	if ok {
-		delete(kv.result, index)
+		delete(kv.result, key)
 	}
 }
 
@@ -77,11 +79,11 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	op.Key = args.Key
 	op.ClientId = args.ClientId
 	op.OpId = args.OpId
-	index, _, isLeader := kv.rf.Start(op)
+	index, term, isLeader := kv.rf.Start(op)
 	if !isLeader {
 		reply.Err = ErrWrongLeader
 	} else {
-		ch := kv.getResultChannel(index)
+		ch := kv.getResultChannel(term, index)
 		go func() {
 			time.Sleep(500 * time.Millisecond)
 			ch <- args.OpId + ":timeout"
@@ -99,20 +101,23 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 				reply.Err = OK
 				reply.Value = opRes
 			}
-			kv.deleteResultChannel(index)
+			kv.deleteResultChannel(term, index)
 		} else {
 			reply.Err = ErrWrongLeader
 		}
 	}
-	// if isLeader {
-	// 	DPrintf("\n")
-	// 	DPrintf("KvServer %d Get finished.\n", kv.me)
-	// 	DPrintf("Args: %v\n", *args)
-	// 	DPrintf("Reply: %v\n", *reply)
-	// }
+	if isLeader {
+		DPrintf("\n")
+		DPrintf("KvServer %d Get finished. index: %d\n", kv.me, index)
+		DPrintf("Args: %v\n", *args)
+		DPrintf("Reply: %v\n", *reply)
+	}
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
+	// DPrintf("KvServer %d PutAppend start.\n", kv.me)
+	// DPrintf("Args: %v\n", *args)
+	// DPrintf("Reply: %v\n", *reply)
 	// Your code here.
 	var op Op
 	op.Op = args.Op
@@ -120,16 +125,17 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	op.Value = args.Value
 	op.ClientId = args.ClientId
 	op.OpId = args.OpId
-	index, _, isLeader := kv.rf.Start(op)
+	index, term, isLeader := kv.rf.Start(op)
 	if !isLeader {
 		reply.Err = ErrWrongLeader
 	} else {
-		ch := kv.getResultChannel(index)
+		ch := kv.getResultChannel(term, index)
 		go func() {
 			time.Sleep(500 * time.Millisecond)
 			ch <- args.OpId + ":timeout"
 		}()
 		rawResult := <-ch
+		DPrintf("rawResult: %v\n", rawResult)
 		tmp := strings.Split(rawResult, ":")
 		opId := tmp[0]
 		opRes := tmp[1]
@@ -139,17 +145,17 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 			} else {
 				reply.Err = OK
 			}
-			kv.deleteResultChannel(index)
+			kv.deleteResultChannel(term, index)
 		} else {
 			reply.Err = ErrWrongLeader
 		}
 	}
-	// if isLeader {
-	// 	DPrintf("\n")
-	// 	DPrintf("KvServer %d PutAppend finished.\n", kv.me)
-	// 	DPrintf("Args: %v\n", *args)
-	// 	DPrintf("Reply: %v\n", *reply)
-	// }
+	if isLeader {
+		DPrintf("\n")
+		DPrintf("KvServer %d PutAppend finished. index: %d\n", kv.me, index)
+		DPrintf("Args: %v\n", *args)
+		DPrintf("Reply: %v\n", *reply)
+	}
 }
 
 //
@@ -174,21 +180,19 @@ func (kv *KVServer) killed() bool {
 }
 
 func (kv *KVServer) startApply() {
-	for msg := range(kv.applyCh) {
+	for msg := range kv.applyCh {
 		if kv.killed() {
 			break
 		}
-		_, isLeader := kv.rf.GetState()
+		term, isLeader := kv.rf.GetState()
+		DPrintf("Server %d commit msg: %v\n", kv.me, msg)
 		if msg.CommandValid {
 			index := msg.CommandIndex
 			var ch chan string
 			if isLeader {
-				ch = kv.getResultChannel(index)
+				ch = kv.getResultChannel(term, index)
 			}
 			op := msg.Command.(Op)
-			// if kv.rf.IsLeader() {
-			// 	DPrintf("commit op: %v\n", op)
-			// }
 			lastResponse, ok := kv.responseHistory[op.ClientId]
 			if ok && lastResponse.opId == op.OpId {
 				if lastResponse.err == OK {
@@ -266,7 +270,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	// You may need initialization code here.
 
 	kv.kvMap = make(map[string]string)
-	kv.result = make(map[int]chan string)
+	kv.result = make(map[string]chan string)
 	kv.responseHistory = make(map[string]Response)
 
 	go kv.startApply()

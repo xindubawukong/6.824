@@ -51,7 +51,7 @@ func (ck *Clerk) getNextOpId() string {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) Get(key string) string {
-	// DPrintf(">> Clerk Get, key: %v\n", key)
+	DPrintf(">> Clerk Get start, key: %v\n", key)
 	// You will have to modify this function.
 	var args GetArgs
 	args.Key = key
@@ -61,6 +61,7 @@ func (ck *Clerk) Get(key string) string {
 	for {
 		ok := ck.servers[ck.lastLeader].Call("KVServer.Get", &args, &reply)
 		if !ok {
+			ck.lastLeader = (ck.lastLeader + 1) % len(ck.servers)
 			time.Sleep(50 * time.Millisecond)
 		} else if reply.Err == ErrWrongLeader {
 			ck.lastLeader = (ck.lastLeader + 1) % len(ck.servers)
@@ -68,6 +69,7 @@ func (ck *Clerk) Get(key string) string {
 			break
 		}
 	}
+	DPrintf(">> Clerk Get end, key: %v\n", key)
 	if reply.Err == OK {
 		return reply.Value
 	} else {
@@ -86,7 +88,7 @@ func (ck *Clerk) Get(key string) string {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	// DPrintf(">> Clerk PutAppend, key: %v, value: %v\n", key, value)
+	DPrintf(">> Clerk PutAppend start, key: %v, value: %v\n", key, value)
 	// You will have to modify this function.
 	var args PutAppendArgs
 	args.Key = key
@@ -96,8 +98,10 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	args.OpId = ck.getNextOpId()
 	var reply PutAppendReply
 	for {
+		DPrintf("lastLeader: %d\n", ck.lastLeader)
 		ok := ck.servers[ck.lastLeader].Call("KVServer.PutAppend", &args, &reply)
 		if !ok {
+			ck.lastLeader = (ck.lastLeader + 1) % len(ck.servers)
 			time.Sleep(50 * time.Millisecond)
 		} else if reply.Err == ErrWrongLeader {
 			ck.lastLeader = (ck.lastLeader + 1) % len(ck.servers)
@@ -105,6 +109,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 			break
 		}
 	}
+	DPrintf(">> Clerk PutAppend end, key: %v, value: %v\n", key, value)
 }
 
 func (ck *Clerk) Put(key string, value string) {

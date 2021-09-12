@@ -446,14 +446,14 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	t := <-ch
 	if t == 1 {
 		*reply = tmp
-		// if len(args.Entries) > 0 {
-		// 	DPrintf("sendAppendEntries  me: %d  server: %d  reply: %v\n", rf.me, server, reply)
-		// }
+		if len(args.Entries) > 0 {
+			DPrintf("sendAppendEntries  me: %d  server: %d  args: %v  reply: %v\n", rf.me, server, *args, *reply)
+		}
 		return true
 	} else {
-		// if len(args.Entries) > 0 {
-		// 	DPrintf("sendAppendEntries  me: %d  server: %d  fail!", rf.me, server)
-		// }
+		if len(args.Entries) > 0 {
+			DPrintf("sendAppendEntries  me: %d  server: %d  fail!", rf.me, server)
+		}
 		return false
 	}
 }
@@ -585,11 +585,39 @@ func (rf *Raft) tryStartElection() {
 	}
 }
 
+func (rf *Raft) sendHeartBeat(server int) {
+	rf.lockFields("sendHeartBeat")
+	shouldSend := rf.status == LEADER
+	var args AppendEntriesArgs
+	if shouldSend {
+		args.Term = rf.currentTerm
+		args.LeaderId = rf.me
+		args.PrevLogIndex = rf.log[len(rf.log)-1].Index
+		args.PrevLogTerm = rf.log[len(rf.log)-1].Term
+		args.Entries = make([]LogEntry, 0)
+		args.LeaderCommit = rf.commitIndex
+	}
+	rf.unlockFields("sendHeartBeat")
+	if !shouldSend {
+		return
+	}
+	var reply AppendEntriesReply
+	rf.sendAppendEntries(server, &args, &reply)
+	rf.lockFields("sendHeartBeat")
+	if rf.currentTerm == reply.Term && reply.Success {
+		rf.matchIndex[server] = get_max(rf.matchIndex[server], args.PrevLogIndex)
+	}
+	if reply.Term > rf.currentTerm {
+		rf.demote(reply.Term)
+	}
+	rf.unlockFields("sendHeartBeat")
+}
+
 func (rf *Raft) trySyncLogWith(server int) {
 	rf.syncing[server].Lock()
 	for !rf.killed() {
 		rf.lockFields("trySyncLogWith 1")
-		shouldSend := (rf.status == LEADER) && rf.log[len(rf.log)-1].Index >= rf.nextIndex[server] - 1
+		shouldSend := (rf.status == LEADER) && rf.log[len(rf.log)-1].Index >= rf.nextIndex[server]
 		shouldInstallSnapshot := false
 		var appendEntriesArgs AppendEntriesArgs
 		var installSnapshotArgs InstallSnapshotArgs
@@ -627,14 +655,10 @@ func (rf *Raft) trySyncLogWith(server int) {
 				shouldBreak = true
 			} else if appendEntriesReply.Success {
 				shouldBreak = true
-				if len(appendEntriesArgs.Entries) > 0 {
-					rf.nextIndex[server] = appendEntriesArgs.Entries[len(appendEntriesArgs.Entries)-1].Index + 1
-					rf.matchIndex[server] = appendEntriesArgs.Entries[len(appendEntriesArgs.Entries)-1].Index
-				} else {
-					rf.matchIndex[server] = appendEntriesArgs.PrevLogIndex
-				}
+				rf.nextIndex[server] = appendEntriesArgs.Entries[len(appendEntriesArgs.Entries)-1].Index + 1
+				rf.matchIndex[server] = appendEntriesArgs.Entries[len(appendEntriesArgs.Entries)-1].Index
 			} else if appendEntriesReply.Term == 0 {
-				shouldBreak = false
+				shouldBreak = true
 			} else { // optimization for nextIndex--
 				shouldBreak = false
 				updated := false
@@ -764,6 +788,7 @@ func (rf *Raft) startHeartBeat() {
 	for !rf.killed() {
 		for i := 0; i < len(rf.peers); i++ {
 			if i != rf.me {
+				go rf.sendHeartBeat(i)
 				go rf.trySyncLogWith(i)
 			}
 		}
@@ -786,7 +811,7 @@ func (rf *Raft) startTryCommit() {
 			N := a[len(rf.peers)/2]
 			pos := binarySearch(rf.log, N)
 			if pos != -1 && N > rf.commitIndex && rf.log[pos].Term == rf.currentTerm {
-				// DPrintf("leader %d commit to %d\n", rf.me, N)
+				DPrintf("leader %d commit to %d\n", rf.me, N)
 				rf.commitIndex = N
 			}
 		}
