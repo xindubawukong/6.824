@@ -57,7 +57,7 @@ func (kv *KVServer) getResultChannel(term, index int) chan string {
 	if ok {
 		return ch
 	}
-	ch = make(chan string, 100)
+	ch = make(chan string, 1)
 	kv.result[key] = ch
 	return ch
 }
@@ -180,6 +180,7 @@ func (kv *KVServer) killed() bool {
 }
 
 func (kv *KVServer) startApply() {
+	lastAppliedIndex := 0
 	for msg := range kv.applyCh {
 		if kv.killed() {
 			break
@@ -188,6 +189,10 @@ func (kv *KVServer) startApply() {
 		DPrintf("KVServer %d commit msg: %v. term: %d, isLeader: %v\n", kv.me, msg, term, isLeader)
 		if msg.CommandValid {
 			index := msg.CommandIndex
+			if index <= lastAppliedIndex {
+				continue
+			}
+			lastAppliedIndex = index
 			var ch chan string
 			if isLeader {
 				ch = kv.getResultChannel(term, index)
