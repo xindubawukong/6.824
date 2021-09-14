@@ -419,9 +419,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			}
 		}
 	}
-	// if len(args.Entries) > 0 {
-	// 	DPrintf("Handling AppendEntries  me: %d  args: %v  reply: %v  log: %v\n", rf.me, args, reply, rf.log)
-	// }
+	if len(args.Entries) > 0 {
+		DPrintf("Handling AppendEntries  me: %d  args: %v  reply: %v  log:\n", rf.me, *args, *reply)
+	}
 	rf.unlockFields("AppendEntries")
 }
 
@@ -816,7 +816,7 @@ func (rf *Raft) startTryCommit() {
 			N := a[len(rf.peers)/2]
 			pos := binarySearch(rf.log, N)
 			if pos != -1 && N > rf.commitIndex && rf.log[pos].Term == rf.currentTerm {
-				// DPrintf("leader %d commit to %d\n", rf.me, N)
+				DPrintf("leader %d commit to %d\n", rf.me, N)
 				rf.commitIndex = N
 			}
 		}
@@ -830,6 +830,9 @@ func (rf *Raft) startTryCommit() {
 				msg.Command = rf.log[pos].Command
 				msgs = append(msgs, msg)
 			}
+		}
+		if len(msgs) > 0 {
+			DPrintf("startTryCommit end for server %d. msgs: %v\n", rf.me, msgs)
 		}
 		rf.unlockFields("startTryCommit")
 		for i := 0; i < len(msgs); i++ {

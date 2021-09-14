@@ -69,7 +69,7 @@ func (ck *Clerk) Get(key string) string {
 			break
 		}
 	}
-	DPrintf(">> Clerk Get end, key: %v\n", key)
+	DPrintf(">> Clerk Get end, key: %v, reply: %v\n", key, reply)
 	if reply.Err == OK {
 		return reply.Value
 	} else {

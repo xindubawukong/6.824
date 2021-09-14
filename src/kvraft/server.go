@@ -57,7 +57,7 @@ func (kv *KVServer) getResultChannel(term, index int) chan string {
 	if ok {
 		return ch
 	}
-	ch = make(chan string, 1)
+	ch = make(chan string, 100)
 	kv.result[key] = ch
 	return ch
 }
@@ -95,7 +95,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		if opId == args.OpId {
 			if opRes == "timeout" {
 				reply.Err = ErrWrongLeader
-			} else if opRes == "no_key" {
+			} else if opRes == "nokey" {
 				reply.Err = ErrNoKey
 			} else {
 				reply.Err = OK
@@ -185,7 +185,7 @@ func (kv *KVServer) startApply() {
 			break
 		}
 		term, isLeader := kv.rf.GetState()
-		DPrintf("Server %d commit msg: %v\n", kv.me, msg)
+		DPrintf("KVServer %d commit msg: %v. term: %d, isLeader: %v\n", kv.me, msg, term, isLeader)
 		if msg.CommandValid {
 			index := msg.CommandIndex
 			var ch chan string
@@ -195,10 +195,12 @@ func (kv *KVServer) startApply() {
 			op := msg.Command.(Op)
 			lastResponse, ok := kv.responseHistory[op.ClientId]
 			if ok && lastResponse.opId == op.OpId {
-				if lastResponse.err == OK {
-					ch <- lastResponse.opId + ":" + lastResponse.value
-				} else {
-					ch <- lastResponse.opId + ":" + lastResponse.err
+				if isLeader {
+					if lastResponse.err == OK {
+						ch <- lastResponse.opId + ":" + lastResponse.value
+					} else {
+						ch <- lastResponse.opId + ":" + lastResponse.err
+					}
 				}
 			} else {
 				kv.mu.Lock()
@@ -234,6 +236,7 @@ func (kv *KVServer) startApply() {
 				kv.mu.Unlock()
 			}
 		}
+		DPrintf("KVServer %d commit msg: %v end.\n", kv.me, msg)
 	}
 }
 

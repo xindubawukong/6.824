@@ -2,12 +2,16 @@ package main
 
 import (
 	"fmt"
+	"time"
 )
 
 func main() {
-	a := make([]int, 0)
-	a = append(a, 2)
-	fmt.Println(a[0:])
-	fmt.Println(a[1:])
-	fmt.Println(a[2:])
+	var ch chan int
+	go func() {
+		fmt.Println("goroutine start")
+		ch <- 1
+		fmt.Println("goroutine end")
+	}()
+	time.Sleep(10 * time.Second)
+	fmt.Println("end")
 }
