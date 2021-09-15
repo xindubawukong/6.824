@@ -106,6 +106,20 @@ func (rf *Raft) GetState() (int, bool) {
 	return term, isleader
 }
 
+func (rf *Raft) GetStateSize() int {
+	rf.lockFields("GetStateSize")
+	size := rf.persister.RaftStateSize()
+	rf.unlockFields("GetStateSize")
+	return size
+}
+
+func (rf *Raft) GetSnapshot() []byte {
+	rf.lockFields("GetSnapshot")
+	data := rf.snapshot
+	rf.unlockFields("GetSnapshot")
+	return data
+}
+
 func (rf *Raft) demote(term int) {
 	rf.votedFor = -1
 	rf.currentTerm = term

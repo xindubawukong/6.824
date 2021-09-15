@@ -1,6 +1,7 @@
 package kvraft
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"sync"
@@ -29,9 +30,9 @@ type Op struct {
 }
 
 type Response struct {
-	opId  string
-	err   string
-	value string
+	OpId  string
+	Err   string
+	Value string
 }
 
 type KVServer struct {
@@ -47,6 +48,36 @@ type KVServer struct {
 	kvMap           map[string]string
 	result          map[string]chan string
 	responseHistory map[string]Response
+}
+
+func (kv *KVServer) getSnapshot() []byte {
+	kv.mu.Lock()
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(kv.kvMap)
+	e.Encode(kv.responseHistory)
+	data := w.Bytes()
+	kv.mu.Unlock()
+	return data
+}
+
+func (kv *KVServer) readFromSnapshot(data []byte) {
+	if data == nil || len(data) < 1 {
+		return
+	}
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var kvMap map[string]string
+	var responseHistory map[string]Response
+	if d.Decode(&kvMap) != nil ||
+		d.Decode(&responseHistory) != nil {
+		DPrintf("Decode error\n")
+	} else {
+		kv.mu.Lock()
+		kv.kvMap = kvMap
+		kv.responseHistory = responseHistory
+		kv.mu.Unlock()
+	}
 }
 
 func (kv *KVServer) getResultChannel(term, index int) chan string {
@@ -199,46 +230,54 @@ func (kv *KVServer) startApply() {
 			}
 			op := msg.Command.(Op)
 			lastResponse, ok := kv.responseHistory[op.ClientId]
-			if ok && lastResponse.opId == op.OpId {
+			if ok && lastResponse.OpId == op.OpId {
 				if isLeader {
-					if lastResponse.err == OK {
-						ch <- lastResponse.opId + ":" + lastResponse.value
+					if lastResponse.Err == OK {
+						ch <- lastResponse.OpId + ":" + lastResponse.Value
 					} else {
-						ch <- lastResponse.opId + ":" + lastResponse.err
+						ch <- lastResponse.OpId + ":" + lastResponse.Err
 					}
 				}
 			} else {
 				kv.mu.Lock()
 				var response Response
-				response.opId = op.OpId
+				response.OpId = op.OpId
 				if op.Op == "Put" {
 					kv.kvMap[op.Key] = op.Value
-					response.err = OK
+					response.Err = OK
 				} else if op.Op == "Append" {
 					value, ok := kv.kvMap[op.Key]
 					if !ok {
 						value = ""
 					}
 					kv.kvMap[op.Key] = value + op.Value
-					response.err = OK
+					response.Err = OK
 				} else if op.Op == "Get" {
 					value, ok := kv.kvMap[op.Key]
 					if !ok {
-						response.err = "nokey"
+						response.Err = "nokey"
 					} else {
-						response.err = OK
-						response.value = value
+						response.Err = OK
+						response.Value = value
 					}
 				}
 				if isLeader {
-					if response.err == OK {
-						ch <- response.opId + ":" + response.value
+					if response.Err == OK {
+						ch <- response.OpId + ":" + response.Value
 					} else {
-						ch <- response.opId + ":" + response.err
+						ch <- response.OpId + ":" + response.Err
 					}
 				}
 				kv.responseHistory[op.ClientId] = response
 				kv.mu.Unlock()
+			}
+			raftStateSize := kv.rf.GetStateSize()
+			if kv.maxraftstate != -1 && raftStateSize > kv.maxraftstate {
+				kv.rf.Snapshot(index, kv.getSnapshot())
+			}
+		} else if msg.SnapshotValid {
+			if kv.rf.CondInstallSnapshot(msg.SnapshotTerm, msg.SnapshotIndex, msg.Snapshot) {
+				kv.readFromSnapshot(msg.Snapshot)
 			}
 		}
 		DPrintf("KVServer %d commit msg: %v end.\n", kv.me, msg)
@@ -280,6 +319,8 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.kvMap = make(map[string]string)
 	kv.result = make(map[string]chan string)
 	kv.responseHistory = make(map[string]Response)
+
+	kv.readFromSnapshot(kv.rf.GetSnapshot())
 
 	go kv.startApply()
 
