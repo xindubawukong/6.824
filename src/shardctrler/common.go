@@ -1,5 +1,9 @@
 package shardctrler
 
+import (
+	"log"
+)
+
 //
 // Shard controler: assigns shards to replication groups.
 //
@@ -17,6 +21,15 @@ package shardctrler
 // You will need to add fields to the RPC argument structs.
 //
 
+const shardCtrlerDebugging = false
+
+func DPrintf(format string, a ...interface{}) (n int, err error) {
+	if shardCtrlerDebugging {
+		log.Printf(format, a...)
+	}
+	return
+}
+
 // The number of shards.
 const NShards = 10
 
@@ -28,6 +41,19 @@ type Config struct {
 	Groups map[int][]string // gid -> servers[]
 }
 
+func (config *Config) copy() Config {
+	var newConfig Config
+	newConfig.Num = config.Num
+	newConfig.Shards = config.Shards
+	newConfig.Groups = make(map[int][]string)
+	for gid, servers := range config.Groups {
+		tmp := make([]string, 0)
+		tmp = append(tmp, servers...)
+		newConfig.Groups[gid] = tmp
+	}
+	return newConfig
+}
+
 const (
 	OK = "OK"
 )
@@ -35,7 +61,9 @@ const (
 type Err string
 
 type JoinArgs struct {
-	Servers map[int][]string // new GID -> servers mappings
+	Servers  map[int][]string // new GID -> servers mappings
+	ClientId string
+	OpId     string
 }
 
 type JoinReply struct {
@@ -44,7 +72,9 @@ type JoinReply struct {
 }
 
 type LeaveArgs struct {
-	GIDs []int
+	GIDs     []int
+	ClientId string
+	OpId     string
 }
 
 type LeaveReply struct {
@@ -53,8 +83,10 @@ type LeaveReply struct {
 }
 
 type MoveArgs struct {
-	Shard int
-	GID   int
+	Shard    int
+	GID      int
+	ClientId string
+	OpId     string
 }
 
 type MoveReply struct {
@@ -63,7 +95,9 @@ type MoveReply struct {
 }
 
 type QueryArgs struct {
-	Num int // desired config number
+	Num      int // desired config number
+	ClientId string
+	OpId     string
 }
 
 type QueryReply struct {
