@@ -58,3 +58,22 @@ type GetReply struct {
 	Err   Err
 	Value string
 }
+
+type UpdateConfigArgs struct {
+	ClientId string
+	OpId     string
+	Config   shardctrler.Config
+}
+
+type PushShardDataArgs struct {
+	ShardStatus ShardStatus
+}
+
+type PushShardDataReply struct {
+	Err Err
+}
+
+type DeleteShardDataArgs struct {
+	Shard int
+	Version int
+}

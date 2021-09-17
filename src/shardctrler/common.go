@@ -41,7 +41,7 @@ type Config struct {
 	Groups map[int][]string // gid -> servers[]
 }
 
-func (config *Config) copy() Config {
+func (config *Config) Copy() Config {
 	var newConfig Config
 	newConfig.Num = config.Num
 	newConfig.Shards = config.Shards

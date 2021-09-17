@@ -42,6 +42,22 @@ type ApplyResult struct {
 	QueryReply *QueryReply
 }
 
+func (res *ApplyResult) isSuccess() bool {
+	if res.JoinReply != nil {
+		return res.JoinReply.Err == OK
+	}
+	if res.LeaveReply != nil {
+		return res.LeaveReply.Err == OK
+	}
+	if res.MoveReply != nil {
+		return res.MoveReply.Err == OK
+	}
+	if res.QueryReply != nil {
+		return res.QueryReply.Err == OK
+	}
+	return false
+}
+
 func (sc *ShardCtrler) getResultChannel(term, index int) chan ApplyResult {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
@@ -200,7 +216,7 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 
 func (sc *ShardCtrler) applyJoin(args *JoinArgs) JoinReply {
 	lastConfig := sc.configs[len(sc.configs)-1]
-	var config Config = lastConfig.copy()
+	var config Config = lastConfig.Copy()
 	config.Num++
 	for k, v := range args.Servers {
 		config.Groups[k] = v
@@ -209,13 +225,13 @@ func (sc *ShardCtrler) applyJoin(args *JoinArgs) JoinReply {
 	sc.configs = append(sc.configs, config)
 	var reply JoinReply
 	reply.WrongLeader = false
-	reply.Err = "success"
+	reply.Err = OK
 	return reply
 }
 
 func (sc *ShardCtrler) applyLeave(args *LeaveArgs) LeaveReply {
 	lastConfig := sc.configs[len(sc.configs)-1]
-	var config Config = lastConfig.copy()
+	var config Config = lastConfig.Copy()
 	config.Num++
 	for _, gid := range args.GIDs {
 		_, ok := config.Groups[gid]
@@ -227,30 +243,30 @@ func (sc *ShardCtrler) applyLeave(args *LeaveArgs) LeaveReply {
 	sc.configs = append(sc.configs, config)
 	var reply LeaveReply
 	reply.WrongLeader = false
-	reply.Err = "success"
+	reply.Err = OK
 	return reply
 }
 
 func (sc *ShardCtrler) applyMove(args *MoveArgs) MoveReply {
-	var config Config = sc.configs[len(sc.configs)-1].copy()
+	var config Config = sc.configs[len(sc.configs)-1].Copy()
 	config.Num++
 	config.Shards[args.Shard] = args.GID
 	sc.configs = append(sc.configs, config)
 	var reply MoveReply
 	reply.WrongLeader = false
-	reply.Err = "success"
+	reply.Err = OK
 	return reply
 }
 
 func (sc *ShardCtrler) applyQuery(args *QueryArgs) QueryReply {
 	var reply QueryReply
 	if args.Num == -1 || args.Num > sc.configs[len(sc.configs)-1].Num {
-		reply.Config = sc.configs[len(sc.configs)-1].copy()
+		reply.Config = sc.configs[len(sc.configs)-1].Copy()
 	} else {
-		reply.Config = sc.configs[args.Num].copy() // ?
+		reply.Config = sc.configs[args.Num].Copy() // ?
 	}
 	reply.WrongLeader = false
-	reply.Err = "success"
+	reply.Err = OK
 	return reply
 }
 
@@ -273,7 +289,7 @@ func (sc *ShardCtrler) applyOp(op Op) ApplyResult {
 		reply := sc.applyQuery(op.QueryArgs)
 		result.QueryReply = &reply
 	} else {
-		fmt.Println("ERROR!!!!!")
+		fmt.Printf("ShardCtrler: Op %v is not supported!!", op)
 	}
 	return result
 }
@@ -321,7 +337,9 @@ func (sc *ShardCtrler) startApply() {
 					ch <- result
 					DPrintf("ShardCtrler %d commit msg: %v. term: %d, isLeader: %v, result: %v\n", sc.me, msg, term, isLeader, result)
 				}
-				sc.resultHistory[op.ClientId] = result
+				if result.isSuccess() {
+					sc.resultHistory[op.ClientId] = result
+				}
 				sc.mu.Unlock()
 			}
 		}
