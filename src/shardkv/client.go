@@ -8,11 +8,16 @@ package shardkv
 // talks to the group that holds the key's shard.
 //
 
-import "6.824/labrpc"
-import "crypto/rand"
-import "math/big"
-import "6.824/shardctrler"
-import "time"
+import (
+	"crypto/rand"
+	"fmt"
+	"math/big"
+	"sync/atomic"
+	"time"
+
+	"6.824/labrpc"
+	"6.824/shardctrler"
+)
 
 //
 // which shard is a key in?
@@ -40,6 +45,8 @@ type Clerk struct {
 	config   shardctrler.Config
 	make_end func(string) *labrpc.ClientEnd
 	// You will have to modify this struct.
+	clientId string
+	opCnt    int64
 }
 
 //
@@ -56,7 +63,13 @@ func MakeClerk(ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 	ck.sm = shardctrler.MakeClerk(ctrlers)
 	ck.make_end = make_end
 	// You'll have to add code here.
+	ck.clientId = fmt.Sprintf("ShardControllerClerk[%d]", nrand())
 	return ck
+}
+
+func (ck *Clerk) getNextOpId() string {
+	tmp := atomic.AddInt64(&ck.opCnt, 1)
+	return fmt.Sprintf("%v_Op[%d]", ck.clientId, tmp)
 }
 
 //
@@ -68,7 +81,8 @@ func MakeClerk(ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 func (ck *Clerk) Get(key string) string {
 	args := GetArgs{}
 	args.Key = key
-
+	args.ClientId = ck.clientId
+	args.OpId = ck.getNextOpId()
 	for {
 		shard := key2shard(key)
 		gid := ck.config.Shards[shard]
@@ -91,8 +105,6 @@ func (ck *Clerk) Get(key string) string {
 		// ask controler for the latest configuration.
 		ck.config = ck.sm.Query(-1)
 	}
-
-	return ""
 }
 
 //
@@ -104,8 +116,8 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	args.Key = key
 	args.Value = value
 	args.Op = op
-
-
+	args.ClientId = ck.clientId
+	args.OpId = ck.getNextOpId()
 	for {
 		shard := key2shard(key)
 		gid := ck.config.Shards[shard]

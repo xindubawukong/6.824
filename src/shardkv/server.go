@@ -1,17 +1,19 @@
 package shardkv
 
+import (
+	"fmt"
+	"sync"
 
-import "6.824/labrpc"
-import "6.824/raft"
-import "sync"
-import "6.824/labgob"
+	"6.824/labgob"
+	"6.824/labrpc"
+	"6.824/raft"
+	"6.824/shardctrler"
+)
 
-
-
-type Op struct {
-	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+type ShardStatus struct {
+	status  string // NO_DATA, READY, SERVING, PUSHING
+	version int
+	data    map[string]string
 }
 
 type ShardKV struct {
@@ -25,8 +27,52 @@ type ShardKV struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
+	config          shardctrler.Config
+	shards          [NShards]ShardStatus
+	knownMaxVersion [NShards]int
+	resultChannel   map[string]chan ApplyResult
+	resultHistory   map[string]ApplyResult
 }
 
+type Op struct {
+	OpType        string
+	ClientId      string
+	OpId          string
+	PutAppendArgs PutAppendArgs
+	GetArgs       GetArgs
+	NeedResult    bool
+}
+
+type ApplyResult struct {
+	OpType         string
+	ClientId       string
+	OpId           string
+	PutAppendReply PutAppendReply
+	GetReply       GetReply
+}
+
+func (kv *ShardKV) getResultChannel(term, index int) chan ApplyResult {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	key := fmt.Sprintf("%d,%d", term, index)
+	ch, ok := kv.resultChannel[key]
+	if ok {
+		return ch
+	}
+	ch = make(chan ApplyResult, 1)
+	kv.resultChannel[key] = ch
+	return ch
+}
+
+func (kv *ShardKV) deleteResultChannel(term, index int) {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	key := fmt.Sprintf("%d,%d", term, index)
+	_, ok := kv.resultChannel[key]
+	if ok {
+		delete(kv.resultChannel, key)
+	}
+}
 
 func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
@@ -46,7 +92,6 @@ func (kv *ShardKV) Kill() {
 	kv.rf.Kill()
 	// Your code here, if desired.
 }
-
 
 //
 // servers[] contains the ports of the servers in this group.
@@ -95,7 +140,6 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
-
 
 	return kv
 }
