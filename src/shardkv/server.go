@@ -109,12 +109,13 @@ type Op struct {
 }
 
 type ApplyResult struct {
-	OpType             string
-	ClientId           string
-	OpId               string
-	PutAppendReply     *PutAppendReply
-	GetReply           *GetReply
-	PushShardDataReply *PushShardDataReply
+	OpType               string
+	ClientId             string
+	OpId                 string
+	PutAppendReply       *PutAppendReply
+	GetReply             *GetReply
+	PushShardDataReply   *PushShardDataReply
+	DeleteShardDataReply *DeleteShardDataReply
 }
 
 func (res *ApplyResult) isSuccess() bool {
@@ -271,7 +272,7 @@ func (kv *ShardKV) ReceiveShardData(args *PushShardDataArgs) PushShardDataReply 
 	return reply
 }
 
-func (kv *ShardKV) DeleteShardData(shard int, version int) {
+func (kv *ShardKV) DeleteShardData(shard int, version int) DeleteShardDataReply {
 	var op Op
 	op.OpType = "DeleteShardData"
 	op.ClientId = kv.getMyClientId()
@@ -279,16 +280,40 @@ func (kv *ShardKV) DeleteShardData(shard int, version int) {
 	op.DeleteShardDataArgs = &DeleteShardDataArgs{}
 	op.DeleteShardDataArgs.Shard = shard
 	op.DeleteShardDataArgs.Version = version
-	op.NeedResult = false
-	kv.rf.Start(op)
+	op.NeedResult = true
+	index, term, isLeader := kv.rf.Start(op)
+	var reply DeleteShardDataReply
+	if !isLeader {
+		reply.Err = ErrWrongLeader
+	} else {
+		ch := kv.getResultChannel(term, index)
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			var result ApplyResult
+			result.OpType = op.OpType
+			result.ClientId = op.ClientId
+			result.OpId = op.OpId
+			result.DeleteShardDataReply = &DeleteShardDataReply{}
+			result.DeleteShardDataReply.Err = "timeout"
+			ch <- result
+		}()
+		var result = <-ch
+		if result.OpId == op.OpId {
+			reply.Err = result.DeleteShardDataReply.Err
+			kv.deleteResultChannel(term, index)
+		} else {
+			reply.Err = "error"
+		}
+	}
+	return reply
 }
 
 func (kv *ShardKV) SendPushShardData(shard int) {
-	DPrintf("SendPushShardData start. me: %d, gid: %d, shard: %d\n", kv.me, kv.gid, shard)
 	var args PushShardDataArgs
 	kv.mu.Lock()
 	if kv.shards[shard].Status == "PUSHING" {
 		args.ShardStatus = kv.shards[shard].Copy()
+		args.ConfigNum = kv.config.Num
 	}
 	kv.mu.Unlock()
 	gid := args.ShardStatus.SendTo
@@ -306,8 +331,6 @@ func (kv *ShardKV) SendPushShardData(shard int) {
 				ok := server.Call("ShardKV.PushShardData", &args, &reply)
 				if ok && reply.Err == OK {
 					kv.DeleteShardData(shard, args.ShardStatus.Version)
-					DPrintf("SendPushShardData end. me: %d, gid: %d, shard: %d\n", kv.me, kv.gid, shard)
-					return
 				}
 			}
 		}
@@ -367,11 +390,15 @@ func (kv *ShardKV) applyUpdateConfig(args *UpdateConfigArgs) {
 	if newConfig.Num > kv.config.Num {
 		kv.config = newConfig.Copy()
 	}
+	if kv.firstConfig.Num != 1 && args.FirstConfig.Num == 1 {
+		kv.firstConfig = args.FirstConfig.Copy()
+	}
 	// For initial data
 	if kv.firstConfig.Num == 1 {
 		for i := 0; i < NShards; i++ {
-			if kv.firstConfig.Shards[i] == kv.gid && kv.shards[i].Version == 0 {
+			if kv.firstConfig.Shards[i] == kv.gid && kv.shards[i].Version == 0 && kv.knownMaxVersion[i] == -1 {
 				kv.shards[i].Status = "READY"
+				kv.knownMaxVersion[i] = 0
 			}
 		}
 	}
@@ -417,8 +444,14 @@ func (kv *ShardKV) applyReceiveShardData(args *PushShardDataArgs) PushShardDataR
 	kv.shards[shard] = args.ShardStatus.Copy()
 	if kv.config.Shards[shard] == kv.gid {
 		kv.shards[shard].Status = "SERVING"
-	} else {
+	} else if args.ConfigNum >= kv.config.Num {
 		kv.shards[shard].Status = "READY"
+	} else {
+		kv.shards[shard].Status = "PUSHING"
+		kv.shards[shard].SendTo = kv.config.Shards[shard]
+		if kv.rf.IsLeader() {
+			kv.SendPushShardData(shard)
+		}
 	}
 	kv.shards[shard].Version++
 	kv.knownMaxVersion[shard] = version
@@ -426,11 +459,14 @@ func (kv *ShardKV) applyReceiveShardData(args *PushShardDataArgs) PushShardDataR
 	return reply
 }
 
-func (kv *ShardKV) applyDeleteShardData(args *DeleteShardDataArgs) {
+func (kv *ShardKV) applyDeleteShardData(args *DeleteShardDataArgs) DeleteShardDataReply {
 	if kv.shards[args.Shard].Status == "PUSHING" && kv.shards[args.Shard].Version == args.Version {
 		kv.shards[args.Shard].Status = "NO_DATA"
 		kv.shards[args.Shard].Data = make(map[string]string)
 	}
+	var reply DeleteShardDataReply
+	reply.Err = OK
+	return reply
 }
 
 // Run inside lock
@@ -451,7 +487,8 @@ func (kv *ShardKV) applyOp(op Op) ApplyResult {
 		reply := kv.applyReceiveShardData(op.PushShardDataArgs)
 		result.PushShardDataReply = &reply
 	} else if op.OpType == "DeleteShardData" {
-		kv.applyDeleteShardData(op.DeleteShardDataArgs)
+		reply := kv.applyDeleteShardData(op.DeleteShardDataArgs)
+		result.DeleteShardDataReply = &reply
 	} else {
 		fmt.Printf("ShardKV: Op %v is not supported!!", op)
 	}
@@ -470,22 +507,23 @@ func (kv *ShardKV) Kill() {
 }
 
 func (kv *ShardKV) startUpdateConfig() {
+	var firstConfig shardctrler.Config
+	tmp := 0
 	for {
+		tmp += 1
 		if kv.rf.IsLeader() {
-			if kv.firstConfig.Num != 1 {
-				firstConfig := kv.shardCtrlerClerk.Query(1)
-				kv.mu.Lock()
-				kv.firstConfig = firstConfig.Copy()
-				kv.mu.Unlock()
-				DPrintf("first config: %v\n", firstConfig)
+			for firstConfig.Num != 1 {
+				firstConfig = kv.shardCtrlerClerk.Query(1)
+				time.Sleep(10 * time.Millisecond)
 			}
 			config := kv.shardCtrlerClerk.Query(-1)
 			kv.mu.Lock()
-			if config.Num > kv.config.Num {
+			if config.Num > kv.config.Num || tmp%10 == 0 {
 				var args UpdateConfigArgs
 				args.ClientId = kv.getMyClientId()
 				args.OpId = kv.getMyNewOpId()
 				args.Config = config.Copy()
+				args.FirstConfig = firstConfig.Copy()
 				kv.UpdateConfig(&args)
 			}
 			kv.mu.Unlock()
@@ -504,9 +542,6 @@ func (kv *ShardKV) startApply() {
 				continue
 			}
 			op := msg.Command.(Op)
-			if kv.rf.IsLeader() {
-				DPrintf("me: %d, gid: %d, op: %v\n", kv.me, kv.gid, op.toString())
-			}
 			var ch chan ApplyResult
 			if isLeader && op.NeedResult {
 				ch = kv.getResultChannel(term, index)
@@ -536,7 +571,7 @@ func (kv *ShardKV) startApply() {
 					ch <- result
 				}
 				if isLeader {
-					DPrintf("ShardKV me=%d gid=%d commit op: %v. term: %d, isLeader: %v, result: %v\n", kv.me, kv.gid, op.toString(), term, isLeader, result.toString())
+					DPrintf("ShardKV me=%d gid=%d commit op: %v. term: %d, isLeader: %v, shard: %d, result: %v\nshard status: %v\n", kv.me, kv.gid, op.toString(), term, isLeader, shard, result.toString(), kv.getShardStatus())
 				}
 				if result.isSuccess() && shard != -1 {
 					kv.shards[shard].ResultHistory[op.ClientId] = result

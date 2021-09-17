@@ -15,7 +15,7 @@ import (
 // You will have to modify these definitions.
 //
 
-const shardKvDebugging = false
+const shardKvDebugging = true
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if shardKvDebugging {
@@ -60,13 +60,15 @@ type GetReply struct {
 }
 
 type UpdateConfigArgs struct {
-	ClientId string
-	OpId     string
-	Config   shardctrler.Config
+	ClientId    string
+	OpId        string
+	Config      shardctrler.Config
+	FirstConfig shardctrler.Config
 }
 
 type PushShardDataArgs struct {
 	ShardStatus ShardStatus
+	ConfigNum   int
 }
 
 type PushShardDataReply struct {
@@ -76,4 +78,8 @@ type PushShardDataReply struct {
 type DeleteShardDataArgs struct {
 	Shard   int
 	Version int
+}
+
+type DeleteShardDataReply struct {
+	Err Err
 }

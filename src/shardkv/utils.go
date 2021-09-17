@@ -5,10 +5,10 @@ import "fmt"
 func (op *Op) toString() string {
 	f := func(op *Op) string {
 		if op.PutAppendArgs != nil {
-			return fmt.Sprintf("%v", *op.PutAppendArgs)
+			return fmt.Sprintf("%v", op.PutAppendArgs)
 		}
 		if op.GetArgs != nil {
-			return fmt.Sprintf("%v", *op.GetArgs)
+			return fmt.Sprintf("%v", op.GetArgs)
 		}
 		if op.UpdateConfigArgs != nil {
 			return fmt.Sprintf("%v", *op.UpdateConfigArgs)
@@ -29,13 +29,13 @@ func (op *Op) toString() string {
 func (res *ApplyResult) toString() string {
 	f := func(res *ApplyResult) string {
 		if res.PutAppendReply != nil {
-			return fmt.Sprintf("%v", *res.PutAppendReply)
+			return fmt.Sprintf("%v", res.PutAppendReply.Err)
 		}
 		if res.GetReply != nil {
-			return fmt.Sprintf("%v", *res.GetReply)
+			return fmt.Sprintf("%v", res.GetReply.Err)
 		}
 		if res.PushShardDataReply != nil {
-			return fmt.Sprintf("%v", *res.PushShardDataReply)
+			return fmt.Sprintf("%v", res.PushShardDataReply.Err)
 		}
 		return "no reply"
 	}
@@ -47,7 +47,7 @@ func (res *ApplyResult) toString() string {
 func (kv *ShardKV) getShardStatus() string {
 	var s = "\n"
 	for i := 0; i < NShards; i++ {
-		s += fmt.Sprintf("shard: %d, status: %v\n", i, kv.shards[i].Status)
+		s += fmt.Sprintf("shard: %d, status: %v, version: %d, data: %v\n", i, kv.shards[i].Status, kv.shards[i].Version, len(kv.shards[i].Data))
 	}
 	return s
 }
