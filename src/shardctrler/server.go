@@ -26,20 +26,20 @@ type Op struct {
 	OpType    string
 	ClientId  string
 	OpId      string
-	JoinArgs  JoinArgs
-	LeaveArgs LeaveArgs
-	MoveArgs  MoveArgs
-	QueryArgs QueryArgs
+	JoinArgs  *JoinArgs
+	LeaveArgs *LeaveArgs
+	MoveArgs  *MoveArgs
+	QueryArgs *QueryArgs
 }
 
 type ApplyResult struct {
 	OpType     string
 	ClientId   string
 	OpId       string
-	JoinReply  JoinReply
-	LeaveReply LeaveReply
-	MoveReply  MoveReply
-	QueryReply QueryReply
+	JoinReply  *JoinReply
+	LeaveReply *LeaveReply
+	MoveReply  *MoveReply
+	QueryReply *QueryReply
 }
 
 func (sc *ShardCtrler) getResultChannel(term, index int) chan ApplyResult {
@@ -70,7 +70,7 @@ func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
 	op.OpType = "Join"
 	op.ClientId = args.ClientId
 	op.OpId = args.OpId
-	op.JoinArgs = *args
+	op.JoinArgs = args
 	index, term, isLeader := sc.rf.Start(op)
 	if !isLeader {
 		reply.WrongLeader = true
@@ -82,6 +82,7 @@ func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
 			result.OpType = op.OpType
 			result.ClientId = op.ClientId
 			result.OpId = op.OpId
+			result.JoinReply = &JoinReply{}
 			result.JoinReply.WrongLeader = true
 			result.JoinReply.Err = "timeout"
 			ch <- result
@@ -102,7 +103,7 @@ func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
 	op.OpType = "Leave"
 	op.ClientId = args.ClientId
 	op.OpId = args.OpId
-	op.LeaveArgs = *args
+	op.LeaveArgs = args
 	index, term, isLeader := sc.rf.Start(op)
 	if !isLeader {
 		reply.WrongLeader = true
@@ -114,6 +115,7 @@ func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
 			result.OpType = op.OpType
 			result.ClientId = op.ClientId
 			result.OpId = op.OpId
+			result.LeaveReply = &LeaveReply{}
 			result.LeaveReply.WrongLeader = true
 			result.LeaveReply.Err = "timeout"
 			ch <- result
@@ -134,7 +136,7 @@ func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
 	op.OpType = "Move"
 	op.ClientId = args.ClientId
 	op.OpId = args.OpId
-	op.MoveArgs = *args
+	op.MoveArgs = args
 	index, term, isLeader := sc.rf.Start(op)
 	if !isLeader {
 		reply.WrongLeader = true
@@ -146,6 +148,7 @@ func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
 			result.OpType = op.OpType
 			result.ClientId = op.ClientId
 			result.OpId = op.OpId
+			result.MoveReply = &MoveReply{}
 			result.MoveReply.WrongLeader = true
 			result.MoveReply.Err = "timeout"
 			ch <- result
@@ -166,7 +169,7 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 	op.OpType = "Query"
 	op.ClientId = args.ClientId
 	op.OpId = args.OpId
-	op.QueryArgs = *args
+	op.QueryArgs = args
 	index, term, isLeader := sc.rf.Start(op)
 	if !isLeader {
 		reply.WrongLeader = true
@@ -178,6 +181,7 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 			result.OpType = op.OpType
 			result.ClientId = op.ClientId
 			result.OpId = op.OpId
+			result.QueryReply = &QueryReply{}
 			result.QueryReply.WrongLeader = true
 			result.QueryReply.Err = "timeout"
 			ch <- result
@@ -194,7 +198,7 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 	}
 }
 
-func (sc *ShardCtrler) applyJoin(args JoinArgs) JoinReply {
+func (sc *ShardCtrler) applyJoin(args *JoinArgs) JoinReply {
 	lastConfig := sc.configs[len(sc.configs)-1]
 	var config Config = lastConfig.copy()
 	config.Num++
@@ -209,7 +213,7 @@ func (sc *ShardCtrler) applyJoin(args JoinArgs) JoinReply {
 	return reply
 }
 
-func (sc *ShardCtrler) applyLeave(args LeaveArgs) LeaveReply {
+func (sc *ShardCtrler) applyLeave(args *LeaveArgs) LeaveReply {
 	lastConfig := sc.configs[len(sc.configs)-1]
 	var config Config = lastConfig.copy()
 	config.Num++
@@ -227,7 +231,7 @@ func (sc *ShardCtrler) applyLeave(args LeaveArgs) LeaveReply {
 	return reply
 }
 
-func (sc *ShardCtrler) applyMove(args MoveArgs) MoveReply {
+func (sc *ShardCtrler) applyMove(args *MoveArgs) MoveReply {
 	var config Config = sc.configs[len(sc.configs)-1].copy()
 	config.Num++
 	config.Shards[args.Shard] = args.GID
@@ -238,7 +242,7 @@ func (sc *ShardCtrler) applyMove(args MoveArgs) MoveReply {
 	return reply
 }
 
-func (sc *ShardCtrler) applyQuery(args QueryArgs) QueryReply {
+func (sc *ShardCtrler) applyQuery(args *QueryArgs) QueryReply {
 	var reply QueryReply
 	if args.Num == -1 || args.Num > sc.configs[len(sc.configs)-1].Num {
 		reply.Config = sc.configs[len(sc.configs)-1].copy()
@@ -257,13 +261,17 @@ func (sc *ShardCtrler) applyOp(op Op) ApplyResult {
 	result.ClientId = op.ClientId
 	result.OpId = op.OpId
 	if op.OpType == "Join" {
-		result.JoinReply = sc.applyJoin(op.JoinArgs)
+		reply := sc.applyJoin(op.JoinArgs)
+		result.JoinReply = &reply
 	} else if op.OpType == "Leave" {
-		result.LeaveReply = sc.applyLeave(op.LeaveArgs)
+		reply := sc.applyLeave(op.LeaveArgs)
+		result.LeaveReply = &reply
 	} else if op.OpType == "Move" {
-		result.MoveReply = sc.applyMove(op.MoveArgs)
+		reply := sc.applyMove(op.MoveArgs)
+		result.MoveReply = &reply
 	} else if op.OpType == "Query" {
-		result.QueryReply = sc.applyQuery(op.QueryArgs)
+		reply := sc.applyQuery(op.QueryArgs)
+		result.QueryReply = &reply
 	} else {
 		fmt.Println("ERROR!!!!!")
 	}
