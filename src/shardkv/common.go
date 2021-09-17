@@ -74,6 +74,6 @@ type PushShardDataReply struct {
 }
 
 type DeleteShardDataArgs struct {
-	Shard int
+	Shard   int
 	Version int
 }

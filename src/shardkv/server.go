@@ -1,6 +1,7 @@
 package shardkv
 
 import (
+	"bytes"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -13,11 +14,12 @@ import (
 )
 
 type ShardStatus struct {
-	Shard   int
-	Status  string // NO_DATA, READY, SERVING, PUSHING
-	Version int
-	Data    map[string]string
-	SendTo  int
+	Shard         int
+	Status        string // NO_DATA, READY, SERVING, PUSHING
+	Version       int
+	Data          map[string]string
+	SendTo        int
+	ResultHistory map[string]ApplyResult
 }
 
 func (status *ShardStatus) Copy() ShardStatus {
@@ -30,6 +32,10 @@ func (status *ShardStatus) Copy() ShardStatus {
 		res.Data[k] = v
 	}
 	res.SendTo = status.SendTo
+	res.ResultHistory = make(map[string]ApplyResult)
+	for k, v := range status.ResultHistory {
+		res.ResultHistory[k] = v
+	}
 	return res
 }
 
@@ -50,8 +56,44 @@ type ShardKV struct {
 	shards           [NShards]ShardStatus
 	knownMaxVersion  [NShards]int
 	resultChannel    map[string]chan ApplyResult
-	resultHistory    map[string]ApplyResult
 	opCnt            int64
+}
+
+func (kv *ShardKV) getSnapshot() []byte {
+	kv.mu.Lock()
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(kv.config)
+	e.Encode(kv.firstConfig)
+	e.Encode(kv.shards)
+	e.Encode(kv.knownMaxVersion)
+	data := w.Bytes()
+	kv.mu.Unlock()
+	return data
+}
+
+func (kv *ShardKV) readFromSnapshot(data []byte) {
+	if data == nil || len(data) < 1 {
+		return
+	}
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var config shardctrler.Config
+	var firstConfig shardctrler.Config
+	var shards [NShards]ShardStatus
+	var knownMaxVersion [NShards]int
+	if d.Decode(&config) != nil || d.Decode(&firstConfig) != nil || d.Decode(&shards) != nil || d.Decode(&knownMaxVersion) != nil {
+		DPrintf("Decode error\n")
+	} else {
+		kv.mu.Lock()
+		kv.config = config.Copy()
+		kv.firstConfig = firstConfig.Copy()
+		for i := 0; i < NShards; i++ {
+			kv.shards[i] = shards[i].Copy()
+		}
+		kv.knownMaxVersion = knownMaxVersion
+		kv.mu.Unlock()
+	}
 }
 
 type Op struct {
@@ -387,6 +429,7 @@ func (kv *ShardKV) applyReceiveShardData(args *PushShardDataArgs) PushShardDataR
 func (kv *ShardKV) applyDeleteShardData(args *DeleteShardDataArgs) {
 	if kv.shards[args.Shard].Status == "PUSHING" && kv.shards[args.Shard].Version == args.Version {
 		kv.shards[args.Shard].Status = "NO_DATA"
+		kv.shards[args.Shard].Data = make(map[string]string)
 	}
 }
 
@@ -468,13 +511,25 @@ func (kv *ShardKV) startApply() {
 			if isLeader && op.NeedResult {
 				ch = kv.getResultChannel(term, index)
 			}
-			lastResult, ok := kv.resultHistory[op.ClientId]
-			if ok && lastResult.OpId == op.OpId {
-				// duplicate op from client
-				if isLeader {
-					ch <- lastResult
+			shard := -1
+			if op.OpType == "PutAppend" {
+				shard = key2shard(op.PutAppendArgs.Key)
+			}
+			if op.OpType == "Get" {
+				shard = key2shard(op.GetArgs.Key)
+			}
+			processed := false
+			if shard != -1 {
+				lastResult, ok := kv.shards[shard].ResultHistory[op.ClientId]
+				if ok && lastResult.OpId == op.OpId {
+					processed = true
+					// duplicate op from client
+					if isLeader {
+						ch <- lastResult
+					}
 				}
-			} else {
+			}
+			if !processed {
 				kv.mu.Lock()
 				result := kv.applyOp(op)
 				if isLeader && op.NeedResult {
@@ -483,10 +538,18 @@ func (kv *ShardKV) startApply() {
 				if isLeader {
 					DPrintf("ShardKV me=%d gid=%d commit op: %v. term: %d, isLeader: %v, result: %v\n", kv.me, kv.gid, op.toString(), term, isLeader, result.toString())
 				}
-				if result.isSuccess() {
-					kv.resultHistory[op.ClientId] = result
+				if result.isSuccess() && shard != -1 {
+					kv.shards[shard].ResultHistory[op.ClientId] = result
 				}
 				kv.mu.Unlock()
+			}
+			raftStateSize := kv.rf.GetStateSize()
+			if kv.maxraftstate != -1 && raftStateSize > kv.maxraftstate {
+				kv.rf.Snapshot(index, kv.getSnapshot())
+			}
+		} else if msg.SnapshotValid {
+			if kv.rf.CondInstallSnapshot(msg.SnapshotTerm, msg.SnapshotIndex, msg.Snapshot) {
+				kv.readFromSnapshot(msg.Snapshot)
 			}
 		}
 	}
@@ -551,10 +614,12 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 		kv.shards[i].Status = "NO_DATA"
 		kv.shards[i].Data = make(map[string]string)
 		kv.shards[i].Version = 0
+		kv.shards[i].ResultHistory = make(map[string]ApplyResult)
 		kv.knownMaxVersion[i] = -1
 	}
 	kv.resultChannel = make(map[string]chan ApplyResult)
-	kv.resultHistory = make(map[string]ApplyResult)
+
+	kv.readFromSnapshot(kv.rf.GetSnapshot())
 
 	go kv.startUpdateConfig()
 	go kv.startApply()
