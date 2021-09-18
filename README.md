@@ -49,9 +49,9 @@ https://pdos.csail.mit.edu/6.824/labs/lab-mr.html
 非常简单，worker周期性向coordinator拉任务即可。
 
 ```
-cd src/main
-go build -race -buildmode=plugin ../mrapps/wc.go
-bash test-mr.sh
+$ cd src/main
+$ go build -race -buildmode=plugin ../mrapps/wc.go
+$ bash test-mr.sh
 ```
 
 ## Lab 2: Raft
