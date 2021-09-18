@@ -15,7 +15,7 @@ import (
 // You will have to modify these definitions.
 //
 
-const shardKvDebugging = true
+const shardKvDebugging = false
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if shardKvDebugging {

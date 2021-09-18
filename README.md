@@ -25,14 +25,8 @@ bash test-mr.sh
 
 https://pdos.csail.mit.edu/6.824/labs/lab-raft.html
 
-Run tests:
 ```
-cd src/raft
-time go test -race
-```
-
-Result:
-```
+$ cd src/raft
 $ time go test -race
 Test (2A): initial election ...
   ... Passed --   3.6  3   52   16758    0
@@ -95,6 +89,8 @@ Please view the comments in the script to know how to use it.
 
 ## Lab 3: Fault-tolerant Key/Value Service
 
+https://pdos.csail.mit.edu/6.824/labs/lab-kvraft.html
+
 ```
 $ cd src/kvraft
 $ time go test -race
@@ -152,4 +148,72 @@ Test: unreliable net, restarts, partitions, snapshots, random keys, many clients
 PASS
 ok      6.824/kvraft    440.838s
 go test -race  619.90s user 50.43s system 151% cpu 7:21.26 total
+```
+
+## Lab 4: Sharded Key/Value Service
+
+https://pdos.csail.mit.edu/6.824/labs/lab-shard.html
+
+```
+$ cd src/shardctrler
+$ time go test -race
+Test: Basic leave/join ...
+  ... Passed
+Test: Historical queries ...
+  ... Passed
+Test: Move ...
+  ... Passed
+Test: Concurrent leave/join ...
+  ... Passed
+Test: Minimal transfers after joins ...
+  ... Passed
+Test: Minimal transfers after leaves ...
+  ... Passed
+Test: Multi-group join/leave ...
+  ... Passed
+Test: Concurrent multi leave/join ...
+  ... Passed
+Test: Minimal transfers after multijoins ...
+  ... Passed
+Test: Minimal transfers after multileaves ...
+  ... Passed
+Test: Check Same config on servers ...
+  ... Passed
+PASS
+ok      6.824/shardctrler       5.921s
+go test -race  2.95s user 0.81s system 58% cpu 6.478 total
+```
+
+```
+$ cd src/shardkv
+$ time go test -race                                  
+Test: static shards ...
+  ... Passed
+Test: join then leave ...
+  ... Passed
+Test: snapshots, join, and leave ...
+  ... Passed
+Test: servers miss configuration changes...
+  ... Passed
+Test: concurrent puts and configuration changes...
+  ... Passed
+Test: more concurrent puts and configuration changes...
+  ... Passed
+Test: concurrent configuration change and restart...
+  ... Passed
+Test: unreliable 1...
+  ... Passed
+Test: unreliable 2...
+  ... Passed
+Test: unreliable 3...
+  ... Passed
+Test: shard deletion (challenge 1) ...
+  ... Passed
+Test: unaffected shard access (challenge 2) ...
+  ... Passed
+Test: partial migration shard access (challenge 2) ...
+  ... Passed
+PASS
+ok      6.824/shardkv   137.357s
+go test -race  246.84s user 17.19s system 191% cpu 2:18.02 total
 ```

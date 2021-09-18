@@ -214,6 +214,13 @@ func (rf *Raft) readPersist(data []byte) {
 	}
 }
 
+func simplify(log []LogEntry) []LogEntry {
+	if len(log) == 1 {
+		return []LogEntry{{nil, log[0].Index, log[0].Term}}
+	}
+	return append([]LogEntry{{nil, log[0].Index, log[0].Term}}, log[1:]...)
+}
+
 //
 // A service wants to switch to snapshot.  Only do so if Raft hasn't
 // have more recent info since it communicate the snapshot on applyCh.
@@ -228,6 +235,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 		pos := binarySearch(rf.log, lastIncludedIndex)
 		if pos != -1 && rf.log[pos].Term == lastIncludedTerm {
 			rf.log = rf.log[pos:]
+			rf.log = simplify(rf.log)
 		} else {
 			rf.log = make([]LogEntry, 0)
 			rf.log = append(rf.log, LogEntry{nil, lastIncludedIndex, lastIncludedTerm})
@@ -253,6 +261,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 		if pos != -1 {
 			rf.snapshot = snapshot
 			rf.log = rf.log[pos:]
+			rf.log = simplify(rf.log)
 			rf.persist()
 		}
 	}

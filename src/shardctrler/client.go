@@ -32,7 +32,7 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
 	// Your code here.
-	ck.clientId = fmt.Sprintf("ShardControllerClerk[%d]", nrand())
+	ck.clientId = fmt.Sprintf("SCClerk[%d]", nrand())
 	return ck
 }
 

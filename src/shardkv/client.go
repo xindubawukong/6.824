@@ -63,7 +63,7 @@ func MakeClerk(ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 	ck.sm = shardctrler.MakeClerk(ctrlers)
 	ck.make_end = make_end
 	// You'll have to add code here.
-	ck.clientId = fmt.Sprintf("ShardControllerClerk[%d]", nrand())
+	ck.clientId = fmt.Sprintf("SKVClerk[%d]", nrand())
 	return ck
 }
 
