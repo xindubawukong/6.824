@@ -11,9 +11,42 @@ $ go version
 go version go1.15.14 darwin/amd64
 ```
 
+```
+$ git diff 04a0ed2d03ffa3ad7b92d51507587ef44152f726 --name-only
+.gitignore
+README.md
+learn_go/temp
+learn_go/temp.go
+learn_go/temp.py
+lectures/crawler.go
+lectures/kv.go
+src/go.mod
+src/go.sum
+src/kvraft/client.go
+src/kvraft/common.go
+src/kvraft/server.go
+src/mr/coordinator.go
+src/mr/rpc.go
+src/mr/worker.go
+src/raft/.gitignore
+src/raft/go-test-many.sh
+src/raft/raft.go
+src/raft/util.go
+src/shardctrler/client.go
+src/shardctrler/common.go
+src/shardctrler/reblance.go
+src/shardctrler/server.go
+src/shardkv/client.go
+src/shardkv/common.go
+src/shardkv/server.go
+src/shardkv/utils.go
+```
+
 ## Lab 1: MapReduce
 
 https://pdos.csail.mit.edu/6.824/labs/lab-mr.html
+
+非常简单，worker周期性向coordinator拉任务即可。
 
 ```
 cd src/main
@@ -24,6 +57,14 @@ bash test-mr.sh
 ## Lab 2: Raft
 
 https://pdos.csail.mit.edu/6.824/labs/lab-raft.html
+
+参照论文，以及这个guide：https://thesquareplanet.com/blog/students-guide-to-raft/
+
+实现细节：
+- 对于snapshot，为了方便对log数组相关的操作，我把log[0]存着snapshot的最后一个entry的term和index。因此log的长度至少是1。
+- 对nextIndex减一的优化，论文里没有详细讲明白，因此我采用了一种可能会多发送一些entries的方式，但最多不会超过应该发送的两倍，并且只需试错一次
+  - 在AppendEntries的返回里，从不匹配的位置往前开始采样，间隔分别为1，2，4，8，16...。leader拿到返回值后，就可以找到最靠后的match的log，然后再发一次即可。
+- 注意installSnapshot返回成功了也不一定就成功安装了snapshot。因此不能更新matchIndex。installSnapshot返回成功后，会继续尝试appendEntries来sync log并更新matchIndex。
 
 ```
 $ cd src/raft
@@ -91,6 +132,13 @@ Please view the comments in the script to know how to use it.
 
 https://pdos.csail.mit.edu/6.824/labs/lab-kvraft.html
 
+实现细节：
+- start一个entry后，根据term和index建立一个channel，如果这个entry被apply了，就会向channel中发送结果。channel不用了记得删掉。
+- 客户端重复请求的过滤：因为一个客户端一定是在一个操作返回之后才进行下一个操作，所以server的状态除了kvMap之外还要保存一个dupMap，clientId -> lastResponse。如果发现现在要apply的entry跟lastResponse里的opId一样，那么就直接返回上次的结果，不apply这个entry。防止append等操作重复进行。
+  - 返回OK的entry记录到lastResponse里。不OK的没有影响state，就不用了。
+  - 其实这里还是有点瑕疵，可能client的某一个request过了很久才从client发到server。因此最好再实现client的opId必须大于lastResponse里的opId才能处理。
+  - 如果允许客户端并发请求呢？我觉得可以在config的阶段设一个客户端最大允许的并发数，然后维护lastResponse的相同大小的set即可。
+
 ```
 $ cd src/kvraft
 $ time go test -race
@@ -153,6 +201,27 @@ go test -race  619.90s user 50.43s system 151% cpu 7:21.26 total
 ## Lab 4: Sharded Key/Value Service
 
 https://pdos.csail.mit.edu/6.824/labs/lab-shard.html
+
+实现细节：
+- Controler跟kvraft基本一样，注意平衡算法的实现需要deterministic即可。
+- shardkv实现了两个challange，包括不用的shard进行删除，以及不同的shard在transfer时互不影响。
+- 对于一个shard，记录以下状态
+  - shard id，表示是哪一个shard
+  - status。一共有4种状态，NULL表示没有这个shard的数据，READY表示有这个shard的数据，SERVE表示这个group正在负责这个shard的读写请求，PUSH表示这个group正在将shard的数据发送给新的config下的group。
+  - version
+  - data，这个shard的kvMap
+  - resultHistory，这个shard的dupMap，用来filter重复的客户端请求
+  - sendTo，如果shard的状态是PUSH，那么sendTo表示要发给哪一个group。这个sendTo在状态变为PUSH的时候就已经确定了，不能再更改。即使config更新了，如S1本来由G1负责，现在变成了G2，那么sentTo就是2。即使G1发现config又更新了，S1由G3来负责，G1也不能直接发送给G3，因为它不知道G2是否已经接收到了这个shard的数据并且接收了读写请求。
+- server state除了记录每一个shard的状态外，还需要记录
+  - 最新的config，以及firstConfig。firstConfig是在第一次启动的时候用的，对应的group可以将shard的status从NULL直接设为READY。
+  - 每一个shard的knownMaxVersion。防止过时的push请求。
+    - 这里有一个问题。如果S1本来由G1负责，新的config里由G2负责，那么G1发送给G2。但G2接收到发现新的config里又由G1负责了，那么会发回给G1。这时，可能会有完全对称的两个请求，无论实现细节是什么，都可能会出现一个shard在G1和G2上同时ready的情况。因此，在G2接收到S1数据的时候，默认把version +1。这样两个请求就不对称了，只有大于knownMaxVersion的请求才是有效的。
+- raft保存的是一个state，也就是replicated state machine。所有的apply操作都必须马上完成，无需等待。因此，PUSH操作需要在goroutine里完成。PUSH完之后，删除shard数据要通过raft来提交一个删除的entry。
+- 总共5种log entry
+  - PutAppend和Get，处理客户端请求
+  - UpdateConfig，周期性地更新最新的config
+  - ReceiveShardData
+  - DeleteShardData
 
 ```
 $ cd src/shardctrler
