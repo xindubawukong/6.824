@@ -46,6 +46,8 @@ src/shardkv/utils.go
 
 https://pdos.csail.mit.edu/6.824/labs/lab-mr.html
 
+实现一个简单版的mapreduce
+
 非常简单，worker周期性向coordinator拉任务即可。
 
 ```
@@ -57,6 +59,8 @@ $ bash test-mr.sh
 ## Lab 2: Raft
 
 https://pdos.csail.mit.edu/6.824/labs/lab-raft.html
+
+实现Raft协议。
 
 参照论文，以及这个guide：https://thesquareplanet.com/blog/students-guide-to-raft/
 
@@ -132,6 +136,8 @@ Please view the comments in the script to know how to use it.
 
 https://pdos.csail.mit.edu/6.824/labs/lab-kvraft.html
 
+根据lab2中的raft协议，实现一个kv数据库
+
 实现细节：
 - start一个entry后，根据term和index建立一个channel，如果这个entry被apply了，就会向channel中发送结果。channel不用了记得删掉。
 - 客户端重复请求的过滤：因为一个客户端一定是在一个操作返回之后才进行下一个操作，所以server的状态除了kvMap之外还要保存一个dupMap，clientId -> lastResponse。如果发现现在要apply的entry跟lastResponse里的opId一样，那么就直接返回上次的结果，不apply这个entry。防止append等操作重复进行。
@@ -201,6 +207,8 @@ go test -race  619.90s user 50.43s system 151% cpu 7:21.26 total
 ## Lab 4: Sharded Key/Value Service
 
 https://pdos.csail.mit.edu/6.824/labs/lab-shard.html
+
+实现一个分布式kv。根据key进行sharding，每一个shard由一个kv数据库处理。controler控制每个shard由哪个raft group来处理。controler和group都是raft cluster。
 
 实现细节：
 - Controler跟kvraft基本一样，注意平衡算法的实现需要deterministic即可。
