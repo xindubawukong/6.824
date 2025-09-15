@@ -6,6 +6,33 @@ https://pdos.csail.mit.edu/6.824/schedule.html
 
 This repo is for Spring 2021.
 
+
+Lectures:
+1. mapreduce
+2. 介绍go
+3. GFS
+4. 通过vm-ft介绍Primary-Backup Replication
+5. Raft(1)
+6. Lab1 Q&A
+7. Raft(2)
+8. Lab2 Q&A
+9. Zookeeper，共识协议的应用
+  - 分布式锁，以及ready file的例子挺有意思
+10. Guest Lecture on Go，没看
+11. Chain Replication。我觉得应该先将vm-ft，再讲CR，最后讲Raft比较好。
+12. Frangipani，一个小的文件系统，通过锁实现cache-consistency和automacy，通过write-ahead log实现crash recovery
+13. Distributed Transactions，2PL和2PC
+14. Spanner
+15. FaRM，OCC。微软的一个research prototype，内部的读写都通过RDMA。因此使用OCC。
+16. Spark，mapreduce的优化版
+17. Facebook Memcache。从cluster维度，到region维度，再到global维度，cache系统的设计
+18. SUNDR, fork consistency
+19. Bitcoin
+20. BlockStack
+21. 不知道啥玩意。感觉是自动生成的胡说八道论文。
+
+## Overview
+
 ```
 $ go version
 go version go1.15.14 darwin/amd64
